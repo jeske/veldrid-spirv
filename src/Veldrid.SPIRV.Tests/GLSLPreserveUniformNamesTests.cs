@@ -133,6 +133,42 @@ namespace Veldrid.SPIRV.Tests
         }
 
         [Fact]
+        public void UniformNames_PreservedInESSL_WithOptimization()
+        {
+            // Test that names are preserved for OpenGL ES (ESSL) targets too
+            // ESSL is used on mobile/embedded devices and has the same requirement
+            string vertexGlsl = TestUtil.LoadShaderText("planet.vert");
+            string fragmentGlsl = TestUtil.LoadShaderText("planet.frag");
+
+            // Step 1: Compile GLSL → SPIRV with optimization (debug: false)
+            SpirvCompilationResult vertexSpirvResult = SpirvCompilation.CompileGlslToSpirv(
+                vertexGlsl, "planet.vert", ShaderStages.Vertex, new GlslCompileOptions(debug: false));
+            SpirvCompilationResult fragmentSpirvResult = SpirvCompilation.CompileGlslToSpirv(
+                fragmentGlsl, "planet.frag", ShaderStages.Fragment, new GlslCompileOptions(debug: false));
+
+            // Step 2: Cross-compile SPIRV → ESSL (OpenGL ES)
+            VertexFragmentCompilationResult result = SpirvCompilation.CompileVertexFragment(
+                vertexSpirvResult.SpirvBytes,
+                fragmentSpirvResult.SpirvBytes,
+                CrossCompileTarget.ESSL,
+                new CrossCompileOptions(false, false, normalizeResourceNames: false));
+
+            _output.WriteLine("=== VERTEX (GLSL→SPIRV[debug:false]→ESSL) ===");
+            _output.WriteLine(result.VertexShader);
+            _output.WriteLine("");
+            _output.WriteLine("=== FRAGMENT (GLSL→SPIRV[debug:false]→ESSL) ===");
+            _output.WriteLine(result.FragmentShader);
+            _output.WriteLine("");
+
+            // Check that uniform block names are preserved in ESSL output
+            Assert.Contains("uniform ProjView", result.VertexShader);
+            Assert.Contains("uniform LightInfo", result.FragmentShader);
+            Assert.DoesNotContain("_RESERVED_IDENTIFIER_FIXUP_", result.VertexShader);
+            Assert.DoesNotContain("_RESERVED_IDENTIFIER_FIXUP_", result.FragmentShader);
+            Assert.DoesNotContain("vdspv_0_0", result.VertexShader);
+        }
+
+        [Fact]
         public void UniformNames_NormalizedInGLSL_WithNormalization()
         {
             byte[] vsBytes = TestUtil.LoadBytes("planet.vert");
