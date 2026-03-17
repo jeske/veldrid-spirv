@@ -1,21 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup Label="Nuget">
-        <PackageId>ppy.Veldrid.SPIRV</PackageId>
+        <PackageId>ArtificialNecessity.Veldrid.SPIRV</PackageId>
         <Version>0.0.0</Version>
         <IsPackable>true</IsPackable>
     </PropertyGroup>
 
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
-        <AssemblyName>ppy.Veldrid.SPIRV</AssemblyName>
+        <AssemblyName>ArtificialNecessity.Veldrid.SPIRV</AssemblyName>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <DocumentationFile>$(BinDir)\$(AssemblyName).xml</DocumentationFile>
         <NativeAssetsPath>$(RepositoryRootDirectory)\build\$(Configuration)\</NativeAssetsPath>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="ppy.Veldrid" Version="4.9.69-ga405fe8484"/>
+        <PackageReference Include="ArtificialNecessity.Veldrid" Version="4.9.4"/>
         <PackageReference Update="Nerdbank.GitVersioning" Version="3.4.255">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
@@ -23,47 +23,47 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="$(NativeAssetsPath)win-x64\libveldrid-spirv.dll">
+        <None Include="$(NativeAssetsPath)win-x64\libveldrid-spirv.dll" Condition="Exists('$(NativeAssetsPath)win-x64\libveldrid-spirv.dll')">
             <PackagePath>runtimes/win-x64/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)win-x86\libveldrid-spirv.dll">
+        <None Include="$(NativeAssetsPath)win-x86\libveldrid-spirv.dll" Condition="Exists('$(NativeAssetsPath)win-x86\libveldrid-spirv.dll')">
             <PackagePath>runtimes/win-x86/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)win-arm64\libveldrid-spirv.dll">
+        <None Include="$(NativeAssetsPath)win-arm64\libveldrid-spirv.dll" Condition="Exists('$(NativeAssetsPath)win-arm64\libveldrid-spirv.dll')">
             <PackagePath>runtimes/win-arm64/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)osx\libveldrid-spirv.dylib">
+        <None Include="$(NativeAssetsPath)osx\libveldrid-spirv.dylib" Condition="Exists('$(NativeAssetsPath)osx\libveldrid-spirv.dylib')">
             <PackagePath>runtimes/osx/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)linux-x64\libveldrid-spirv.so">
+        <None Include="$(NativeAssetsPath)linux-x64\libveldrid-spirv.so" Condition="Exists('$(NativeAssetsPath)linux-x64\libveldrid-spirv.so')">
             <PackagePath>runtimes/linux-x64/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)linux-arm64\libveldrid-spirv.so">
+        <None Include="$(NativeAssetsPath)linux-arm64\libveldrid-spirv.so" Condition="Exists('$(NativeAssetsPath)linux-arm64\libveldrid-spirv.so')">
             <PackagePath>runtimes/linux-arm64/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)ios\**\veldrid-spirv.xcframework\**\*">
+        <None Include="$(NativeAssetsPath)ios\**\veldrid-spirv.xcframework\**\*" Condition="Exists('$(NativeAssetsPath)ios')">
             <PackagePath>runtimes/ios/native/veldrid-spirv.xcframework</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)android-armeabi-v7a\libveldrid-spirv.so">
+        <None Include="$(NativeAssetsPath)android-armeabi-v7a\libveldrid-spirv.so" Condition="Exists('$(NativeAssetsPath)android-armeabi-v7a\libveldrid-spirv.so')">
             <PackagePath>runtimes/android-arm/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)android-arm64-v8a\libveldrid-spirv.so">
+        <None Include="$(NativeAssetsPath)android-arm64-v8a\libveldrid-spirv.so" Condition="Exists('$(NativeAssetsPath)android-arm64-v8a\libveldrid-spirv.so')">
             <PackagePath>runtimes/android-arm64/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)android-x86_64\libveldrid-spirv.so">
+        <None Include="$(NativeAssetsPath)android-x86_64\libveldrid-spirv.so" Condition="Exists('$(NativeAssetsPath)android-x86_64\libveldrid-spirv.so')">
             <PackagePath>runtimes/android-x64/native</PackagePath>
             <Pack>true</Pack>
         </None>
-        <None Include="$(NativeAssetsPath)android-x86\libveldrid-spirv.so">
+        <None Include="$(NativeAssetsPath)android-x86\libveldrid-spirv.so" Condition="Exists('$(NativeAssetsPath)android-x86\libveldrid-spirv.so')">
             <PackagePath>runtimes/android-x86/native</PackagePath>
             <Pack>true</Pack>
         </None>
