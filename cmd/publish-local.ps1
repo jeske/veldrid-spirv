@@ -1,5 +1,11 @@
 $ErrorActionPreference = "Stop"
 
+$nativeDll = "build\Release\win-x64\libveldrid-spirv.dll"
+if (-not (Test-Path $nativeDll)) {
+    Write-Host "Native binary not found at '$nativeDll'. You must run 'build-native.cmd release win-x64' before publishing." -ForegroundColor Yellow
+    exit 1
+}
+
 $localNuGetRepo = $env:LOCAL_NUGET_REPO
 if (-not $localNuGetRepo) {
     Write-Error "LOCAL_NUGET_REPO environment variable is not set. Set it to the path of your local NuGet repository folder."
