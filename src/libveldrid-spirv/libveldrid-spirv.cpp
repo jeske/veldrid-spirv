@@ -681,6 +681,14 @@ VD_EXPORT CompilationResult *CompileGlslToSpirv(GlslCompileInfo *info)
             options.SetOptimizationLevel(shaderc_optimization_level_performance);
         }
 
+        // CRITICAL: Preserve binding and descriptor_set decorations during optimization.
+        // Veldrid's resource model requires shader binding numbers to exactly match the
+        // ResourceLayout slots declared in C# application code. On Vulkan, D3D12, and Metal
+        // there is no runtime query to discover where bindings ended up after compilation —
+        // the numbers ARE the contract. If the optimizer strips unused bindings and renumbers
+        // the survivors, the pipeline silently binds the wrong resources.
+        options.SetPreserveBindings(true);
+
         for (uint32_t i = 0; i < info->Macros.Count; i++)
         {
             const MacroDefinition &macro = info->Macros[i];

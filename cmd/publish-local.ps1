@@ -1,11 +1,49 @@
 $ErrorActionPreference = "Stop"
 
-$nativeDll = "build\Release\win-x64\libveldrid-spirv.dll"
-if (-not (Test-Path $nativeDll)) {
-    Write-Host "Native binary not found at '$nativeDll'. You must run 'build-native.cmd release win-x64' before publishing." -ForegroundColor Yellow
+# ── Locate native DLLs ──────────────────────────────────────────────────────
+# The csproj picks up native assets from build\<Configuration>\<rid>\.
+# We build the native library in Release, but pack the managed assembly in
+# Debug.  To bridge the gap, copy Release native DLLs into the Debug tree
+# so the pack step can find them.  If neither Release nor Debug exist,
+# fail early — the native library hasn't been built.
+
+$rids = @("win-x64", "win-x86", "win-arm64")
+$dllName = "libveldrid-spirv.dll"
+$foundAny = $false
+
+foreach ($rid in $rids) {
+    $releaseDll = "build\Release\$rid\$dllName"
+    $debugDir   = "build\Debug\$rid"
+    $debugDll   = "$debugDir\$dllName"
+
+    if (Test-Path $releaseDll) {
+        if (-not (Test-Path $debugDir)) {
+            New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+        }
+        Copy-Item $releaseDll $debugDll -Force
+        Write-Host "  Native DLL ($rid): copied Release -> Debug" -ForegroundColor DarkGray
+        $foundAny = $true
+    } elseif (Test-Path $debugDll) {
+        Write-Host "  Native DLL ($rid): using existing Debug build" -ForegroundColor DarkGray
+        $foundAny = $true
+    } else {
+        Write-Host "  Native DLL ($rid): not found (skipped)" -ForegroundColor Yellow
+    }
+}
+
+if (-not $foundAny) {
+    Write-Error "No native binaries found under build\Release or build\Debug for any platform. Build the native library first (see build-native.cmd)."
     exit 1
 }
 
+# Require at least win-x64 — that's the primary development platform.
+$requiredDll = "build\Debug\win-x64\$dllName"
+if (-not (Test-Path $requiredDll)) {
+    Write-Error "Required native binary not found at '$requiredDll'. You must build at least win-x64 before publishing."
+    exit 1
+}
+
+# ── Validate LOCAL_NUGET_REPO ──────────────────────────────────────────────
 $localNuGetRepo = $env:LOCAL_NUGET_REPO
 if (-not $localNuGetRepo) {
     Write-Error "LOCAL_NUGET_REPO environment variable is not set. Set it to the path of your local NuGet repository folder."
@@ -17,6 +55,7 @@ if (-not (Test-Path $localNuGetRepo)) {
     exit 1
 }
 
+# ── Build, pack, publish ───────────────────────────────────────────────────
 $projectPath = "src/Veldrid.SPIRV/Veldrid.SPIRV.csproj"
 $configuration = "Debug"
 
