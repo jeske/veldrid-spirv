@@ -20,6 +20,7 @@ namespace Veldrid.SPIRV
         /// <param name="fsBytes">The fragment shader's SPIR-V bytecode or ASCII-encoded GLSL source code.</param>
         /// <param name="target">The target language.</param>
         /// <returns>A <see cref="VertexFragmentCompilationResult"/> containing the compiled output.</returns>
+        [Obsolete("Use ShaderBundleCompiler.CompileVertexFragment() to produce .vdshader bundles instead.")]
         public static unsafe VertexFragmentCompilationResult CompileVertexFragment(
             byte[] vsBytes,
             byte[] fsBytes,
@@ -33,6 +34,7 @@ namespace Veldrid.SPIRV
         /// <param name="target">The target language.</param>
         /// <param name="options">The options for shader translation.</param>
         /// <returns>A <see cref="VertexFragmentCompilationResult"/> containing the compiled output.</returns>
+        [Obsolete("Use ShaderBundleCompiler.CompileVertexFragment() to produce .vdshader bundles instead.")]
         public static unsafe VertexFragmentCompilationResult CompileVertexFragment(
             byte[] vsBytes,
             byte[] fsBytes,
@@ -150,9 +152,23 @@ namespace Veldrid.SPIRV
                         }
                     }
 
+                    BindingMapEntry[] bindingMap = new BindingMapEntry[reflInfo->BindingMap.Count];
+                    for (uint i = 0; i < reflInfo->BindingMap.Count; i++)
+                    {
+                        ref NativeBindingMapEntry nativeEntry =
+                            ref reflInfo->BindingMap.Ref<NativeBindingMapEntry>(i);
+                        bindingMap[i] = new BindingMapEntry(
+                            nativeEntry.Set,
+                            nativeEntry.Binding,
+                            nativeEntry.Kind,
+                            nativeEntry.Stages,
+                            nativeEntry.FlatIndex);
+                    }
+
                     SpirvReflection reflection = new SpirvReflection(
                         vertexElements,
-                        layouts);
+                        layouts,
+                        bindingMap);
 
                     return new VertexFragmentCompilationResult(vsCode, fsCode, reflection);
                 }
@@ -172,6 +188,7 @@ namespace Veldrid.SPIRV
         /// <param name="csBytes">The compute shader's SPIR-V bytecode or ASCII-encoded GLSL source code.</param>
         /// <param name="target">The target language.</param>
         /// <returns>A <see cref="ComputeCompilationResult"/> containing the compiled output.</returns>
+        [Obsolete("Use ShaderBundleCompiler.CompileCompute() to produce .vdshader bundles instead.")]
         public static unsafe ComputeCompilationResult CompileCompute(
             byte[] csBytes,
             CrossCompileTarget target) => CompileCompute(csBytes, target, new CrossCompileOptions());
@@ -183,6 +200,7 @@ namespace Veldrid.SPIRV
         /// <param name="target">The target language.</param>
         /// <param name="options">The options for shader translation.</param>
         /// <returns>A <see cref="ComputeCompilationResult"/> containing the compiled output.</returns>
+        [Obsolete("Use ShaderBundleCompiler.CompileCompute() to produce .vdshader bundles instead.")]
         public static unsafe ComputeCompilationResult CompileCompute(
             byte[] csBytes,
             CrossCompileTarget target,
@@ -253,9 +271,23 @@ namespace Veldrid.SPIRV
                         }
                     }
 
+                    BindingMapEntry[] bindingMap = new BindingMapEntry[reflInfo->BindingMap.Count];
+                    for (uint i = 0; i < reflInfo->BindingMap.Count; i++)
+                    {
+                        ref NativeBindingMapEntry nativeEntry =
+                            ref reflInfo->BindingMap.Ref<NativeBindingMapEntry>(i);
+                        bindingMap[i] = new BindingMapEntry(
+                            nativeEntry.Set,
+                            nativeEntry.Binding,
+                            nativeEntry.Kind,
+                            nativeEntry.Stages,
+                            nativeEntry.FlatIndex);
+                    }
+
                     SpirvReflection reflection = new SpirvReflection(
                         Array.Empty<VertexElementDescription>(),
-                        layouts);
+                        layouts,
+                        bindingMap);
 
                     return new ComputeCompilationResult(csCode, reflection);
                 }

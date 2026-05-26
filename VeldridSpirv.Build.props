@@ -4,7 +4,7 @@
        Dependency versions — edit here, all projects pick them up
        ═══════════════════════════════════════════════════════════════════════════ -->
   <PropertyGroup>
-    <ANVeldridVersion>5.260525.201836</ANVeldridVersion>
+    <ANVeldridVersion>5.260526.142303</ANVeldridVersion>
   </PropertyGroup>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════
@@ -14,15 +14,15 @@
        ═══════════════════════════════════════════════════════════════════════════ -->
   <PropertyGroup>
     <VeldridSpirvMajorVersion>5</VeldridSpirvMajorVersion>
-    <!-- AssemblyVersion segments (ushort-constrained, split timestamp) -->
-    <_BuildYYMM>$([System.DateTime]::Now.ToString("yyMM"))</_BuildYYMM>
-    <_BuildDDHH>$([System.DateTime]::Now.ToString("ddHH"))</_BuildDDHH>
-    <_Buildmmss>$([System.DateTime]::Now.ToString("mmss"))</_Buildmmss>
+    <!-- Timestamp segments — set by publish-local.cs via /p: overrides.
+         Fallback to DateTime::Now for IDE/manual builds (not guaranteed consistent across projects). -->
+    <_BuildYYMM Condition="'$(_BuildYYMM)' == ''">$([System.DateTime]::Now.ToString("yyMM"))</_BuildYYMM>
+    <_BuildDDHH Condition="'$(_BuildDDHH)' == ''">$([System.DateTime]::Now.ToString("ddHH"))</_BuildDDHH>
+    <_Buildmmss Condition="'$(_Buildmmss)' == ''">$([System.DateTime]::Now.ToString("mmss"))</_Buildmmss>
+    <_BuildYYMMDD Condition="'$(_BuildYYMMDD)' == ''">$([System.DateTime]::Now.ToString("yyMMdd"))</_BuildYYMMDD>
+    <_BuildHHmmss Condition="'$(_BuildHHmmss)' == ''">$([System.DateTime]::Now.ToString("HHmmss"))</_BuildHHmmss>
     <AssemblyVersion>$(VeldridSpirvMajorVersion).$(_BuildYYMM).$(_BuildDDHH).$(_Buildmmss)</AssemblyVersion>
     <FileVersion>$(AssemblyVersion)</FileVersion>
-    <!-- PackageVersion segments (NuGet, no ushort constraint — full date+time) -->
-    <_BuildYYMMDD>$([System.DateTime]::Now.ToString("yyMMdd"))</_BuildYYMMDD>
-    <_BuildHHmmss>$([System.DateTime]::Now.ToString("HHmmss"))</_BuildHHmmss>
     <Version>$(VeldridSpirvMajorVersion).$(_BuildYYMMDD).$(_BuildHHmmss)</Version>
   </PropertyGroup>
 

@@ -358,6 +358,8 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     AddResources(fsResources.storage_images, fsCompiler, allResources, 1, info.NormalizeResourceNames, true, true);
     AddResources(fsResources.separate_samplers, fsCompiler, allResources, 1, info.NormalizeResourceNames);
 
+    std::vector<BindingMapEntry> bindingMapEntries;
+
     if (info.Target == HLSL || info.Target == MSL)
     {
         uint32_t bufferIndex = 0;
@@ -378,6 +380,19 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
             {
                 fsCompiler->set_decoration(fsID, spv::Decoration::DecorationBinding, index);
             }
+
+            // Capture the binding map entry
+            ShaderStages stages = ShaderStages::None;
+            if (vsID != 0) { stages = stages | ShaderStages::Vertex; }
+            if (fsID != 0) { stages = stages | ShaderStages::Fragment; }
+
+            BindingMapEntry entry = {};
+            entry.Set = it.first.Set;
+            entry.Binding = it.first.Binding;
+            entry.Kind = it.second.Kind;
+            entry.Stages = stages;
+            entry.FlatIndex = index;
+            bindingMapEntries.push_back(entry);
         }
     }
 
@@ -500,6 +515,13 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     ReflectVertexInfo(*vsCompiler, vsResources, result->Reflection);
     result->Reflection.ResourceLayouts = CreateResourceLayoutArray(allResources, false);
 
+    if (!bindingMapEntries.empty())
+    {
+        result->Reflection.BindingMap.CopyFrom(
+            static_cast<uint32_t>(bindingMapEntries.size()),
+            bindingMapEntries.data());
+    }
+
     delete vsCompiler;
     delete fsCompiler;
 
@@ -525,6 +547,8 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
     AddResources(csResources.storage_images, csCompiler, allResources, 0, info.NormalizeResourceNames, true, true);
     AddResources(csResources.separate_samplers, csCompiler, allResources, 0, info.NormalizeResourceNames);
 
+    std::vector<BindingMapEntry> bindingMapEntries;
+
     if (info.Target == HLSL || info.Target == MSL)
     {
         uint32_t bufferIndex = 0;
@@ -540,6 +564,15 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
             {
                 csCompiler->set_decoration(csID, spv::Decoration::DecorationBinding, index);
             }
+
+            // Capture the binding map entry
+            BindingMapEntry entry = {};
+            entry.Set = it.first.Set;
+            entry.Binding = it.first.Binding;
+            entry.Kind = it.second.Kind;
+            entry.Stages = ShaderStages::Compute;
+            entry.FlatIndex = index;
+            bindingMapEntries.push_back(entry);
         }
     }
 
@@ -585,6 +618,13 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
     result->DataBuffers[0].CopyFrom(static_cast<uint32_t>(csText.length()), (uint8_t *)csText.c_str());
 
     result->Reflection.ResourceLayouts = CreateResourceLayoutArray(allResources, true);
+
+    if (!bindingMapEntries.empty())
+    {
+        result->Reflection.BindingMap.CopyFrom(
+            static_cast<uint32_t>(bindingMapEntries.size()),
+            bindingMapEntries.data());
+    }
 
     return result;
 }

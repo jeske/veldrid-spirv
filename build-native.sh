@@ -8,7 +8,19 @@ _CMakeBuildTarget=veldrid-spirv
 _CMakeOsxArchitectures=
 _CMakeGenerator=
 _CMakeExtraBuildArgs=
-_OSDir=
+
+# Auto-detect OS if not specified
+if [[ "$(uname)" == "Darwin" ]]; then
+    _OSDir=osx
+elif [[ "$(uname)" == "Linux" ]]; then
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        _OSDir=linux-arm64
+    else
+        _OSDir=linux-x64
+    fi
+else
+    _OSDir=
+fi
 
 while :; do
     if [ $# -le 0 ]; then

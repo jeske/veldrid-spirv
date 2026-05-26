@@ -244,10 +244,20 @@ struct ResourceLayoutDescription
     InteropArray<ResourceElementDescription> ResourceElements;
 };
 
+struct BindingMapEntry
+{
+    uint32_t Set;
+    uint32_t Binding;
+    ResourceKind Kind;
+    ShaderStages Stages;
+    uint32_t FlatIndex;
+};
+
 struct ReflectionInfo
 {
     InteropArray<VertexElementDescription> VertexElements;
     InteropArray<ResourceLayoutDescription> ResourceLayouts;
+    InteropArray<BindingMapEntry> BindingMap;
 };
 
 struct CompilationResult

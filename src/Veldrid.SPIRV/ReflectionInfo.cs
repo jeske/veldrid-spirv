@@ -7,6 +7,7 @@ namespace Veldrid.SPIRV
     {
         public InteropArray VertexElements; // InteropArray<NativeVertexElementDescription>
         public InteropArray ResourceLayouts; // InteropArray<NativeResourceLayoutDescription>
+        public InteropArray BindingMap; // InteropArray<NativeBindingMapEntry>
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -31,5 +32,15 @@ namespace Veldrid.SPIRV
         public ResourceKind Kind;
         public ShaderStages Stages;
         public ResourceLayoutElementOptions Options;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct NativeBindingMapEntry
+    {
+        public uint Set;
+        public uint Binding;
+        public ResourceKind Kind;
+        public ShaderStages Stages;
+        public uint FlatIndex;
     }
 }

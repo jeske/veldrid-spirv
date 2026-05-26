@@ -87,9 +87,27 @@ foreach (string rid in rids)
 
 if (!foundAny)
 {
-    WriteColored("ERROR: No native binaries found under build/Release or build/Debug for any platform.", ConsoleColor.Red);
-    WriteColored("Build the native library first: ./build-native.sh Release osx", ConsoleColor.Yellow);
-    Environment.Exit(1);
+    WriteColored("Native library not found — building it now...", ConsoleColor.Yellow);
+    RunOrExit("bash", $"\"{Path.Combine(repoRoot, "build-native.sh")}\" Release");
+    // Re-check after build
+    foreach (string rid2 in rids)
+    {
+        string releaseLib2 = Path.Combine(repoRoot, "build", "Release", rid2, nativeLibName);
+        string debugDir2   = Path.Combine(repoRoot, "build", "Debug", rid2);
+        string debugLib2   = Path.Combine(debugDir2, nativeLibName);
+        if (File.Exists(releaseLib2))
+        {
+            Directory.CreateDirectory(debugDir2);
+            File.Copy(releaseLib2, debugLib2, overwrite: true);
+            WriteColored($"  Native lib ({rid2}): built and copied Release -> Debug", ConsoleColor.DarkGray);
+            foundAny = true;
+        }
+    }
+    if (!foundAny)
+    {
+        WriteColored("ERROR: Native build completed but no library found. Check build-native.sh output.", ConsoleColor.Red);
+        Environment.Exit(1);
+    }
 }
 
 // Verify at least the primary platform native lib exists
