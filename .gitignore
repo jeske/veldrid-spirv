@@ -269,3 +269,6 @@ download/
 # Shaderc
 ext/shaderc
 
+# Directory.Build.props is reserved for local developer overrides (not checked in)
+Directory.Build.props
+

@@ -1,4 +1,35 @@
+#!/usr/bin/env pwsh
+# publish-local.ps1 — Build and pack Veldrid.SPIRV package to local NuGet feed
+#
+# Versioning is timestamp-based (v2) — every build gets a unique version
+# automatically via VeldridSpirv.Build.props. No version files to manage.
+# The timestamp is captured once here and passed to MSBuild so all projects
+# get the exact same version (no inter-project skew).
+#
+# Usage:
+#   ./cmd/publish-local.ps1                    # Debug build + pack + deploy
+#   ./cmd/publish-local.ps1 -Release           # Release configuration
+#
+# Requires: LOCAL_NUGET_REPO environment variable set to local feed path
+
+param(
+    [switch]$Release
+)
+
 $ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+$projectPath = Join-Path $repoRoot 'src\Veldrid.SPIRV\Veldrid.SPIRV.csproj'
+$configuration = if ($Release) { "Release" } else { "Debug" }
+
+Write-Host "=== Veldrid.SPIRV publish-local ($configuration) ===" -ForegroundColor Cyan
+
+if (-not $env:LOCAL_NUGET_REPO) {
+    Write-Host "ERROR: LOCAL_NUGET_REPO environment variable not set." -ForegroundColor Red
+    Write-Host '$env:LOCAL_NUGET_REPO = "C:\PROJECTS\LocalNuGet"' -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host "Local NuGet feed: $env:LOCAL_NUGET_REPO" -ForegroundColor Gray
 
 # ── Locate native DLLs ──────────────────────────────────────────────────────
 # The csproj picks up native assets from build\<Configuration>\<rid>\.
@@ -12,9 +43,9 @@ $dllName = "libveldrid-spirv.dll"
 $foundAny = $false
 
 foreach ($rid in $rids) {
-    $releaseDll = "build\Release\$rid\$dllName"
-    $debugDir   = "build\Debug\$rid"
-    $debugDll   = "$debugDir\$dllName"
+    $releaseDll = Join-Path $repoRoot "build\Release\$rid\$dllName"
+    $debugDir   = Join-Path $repoRoot "build\Debug\$rid"
+    $debugDll   = Join-Path $debugDir $dllName
 
     if (Test-Path $releaseDll) {
         if (-not (Test-Path $debugDir)) {
@@ -37,42 +68,43 @@ if (-not $foundAny) {
 }
 
 # Require at least win-x64 — that's the primary development platform.
-$requiredDll = "build\Debug\win-x64\$dllName"
+$requiredDll = Join-Path $repoRoot "build\Debug\win-x64\$dllName"
 if (-not (Test-Path $requiredDll)) {
     Write-Error "Required native binary not found at '$requiredDll'. You must build at least win-x64 before publishing."
     exit 1
 }
 
-# ── Validate LOCAL_NUGET_REPO ──────────────────────────────────────────────
-$localNuGetRepo = $env:LOCAL_NUGET_REPO
-if (-not $localNuGetRepo) {
-    Write-Error "LOCAL_NUGET_REPO environment variable is not set. Set it to the path of your local NuGet repository folder."
-    exit 1
-}
+# Capture timestamp ONCE so the build and pack get the exact same version
+$now = [System.DateTime]::Now
+$buildYYMM   = $now.ToString('yyMM')
+$buildDDHH   = $now.ToString('ddHH')
+$buildmmss   = $now.ToString('mmss')
+$buildYYMMDD = $now.ToString('yyMMdd')
+$buildHHmmss = $now.ToString('HHmmss')
+$versionProps = "/p:_BuildYYMM=$buildYYMM", "/p:_BuildDDHH=$buildDDHH", "/p:_Buildmmss=$buildmmss", "/p:_BuildYYMMDD=$buildYYMMDD", "/p:_BuildHHmmss=$buildHHmmss"
 
-if (-not (Test-Path $localNuGetRepo)) {
-    Write-Error "LOCAL_NUGET_REPO path '$localNuGetRepo' does not exist. Create the directory or fix the environment variable."
-    exit 1
-}
+Write-Host "Version stamp: 5.$buildYYMM.$buildDDHH.$buildmmss (pkg: 5.$buildYYMMDD.$buildHHmmss)" -ForegroundColor Gray
 
-# ── Build, pack, publish ───────────────────────────────────────────────────
-$projectPath = "src/Veldrid.SPIRV/Veldrid.SPIRV.csproj"
-$configuration = "Debug"
+# Capture deploy start time so we can identify newly deployed packages
+$deployStartTime = Get-Date
 
-Write-Host "Cleaning..." -ForegroundColor Cyan
-dotnet clean $projectPath -c $configuration
+# Build
+Write-Host "`n[1/3] Cleaning..." -ForegroundColor Green
+dotnet clean $projectPath -c $configuration -v quiet
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Building..." -ForegroundColor Cyan
-dotnet build $projectPath -c $configuration
+Write-Host "`n[2/3] Building..." -ForegroundColor Green
+dotnet build $projectPath -c $configuration @versionProps
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Packing..." -ForegroundColor Cyan
-dotnet pack $projectPath -c $configuration --no-build
+Write-Host "`n[3/3] Packing..." -ForegroundColor Green
+dotnet pack $projectPath -c $configuration --no-build @versionProps
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$packageOutputDir = "bin\Packages\$configuration"
-$nupkgFiles = Get-ChildItem $packageOutputDir -Filter "*.nupkg"
+# Deploy to local NuGet feed
+$packageOutputDir = Join-Path $repoRoot "bin\Packages\$configuration"
+$nupkgFiles = Get-ChildItem $packageOutputDir -Filter "*.nupkg" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -ge $deployStartTime }
 
 if ($nupkgFiles.Count -eq 0) {
     Write-Error "No .nupkg files found in '$packageOutputDir'. Pack may have failed silently."
@@ -80,7 +112,20 @@ if ($nupkgFiles.Count -eq 0) {
 }
 
 foreach ($nupkgFile in $nupkgFiles) {
-    $destinationPath = Join-Path $localNuGetRepo $nupkgFile.Name
+    $destinationPath = Join-Path $env:LOCAL_NUGET_REPO $nupkgFile.Name
     Copy-Item $nupkgFile.FullName $destinationPath -Force
-    Write-Host "Published: $($nupkgFile.Name) -> $localNuGetRepo" -ForegroundColor Green
+}
+
+# Show only packages deployed during this run
+$deployedPackages = Get-ChildItem "$env:LOCAL_NUGET_REPO\*.nupkg" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -ge $deployStartTime } |
+    Sort-Object Name
+if ($deployedPackages) {
+    Write-Host "`nDeployed packages:" -ForegroundColor Cyan
+    foreach ($deployedPackage in $deployedPackages) {
+        $sizeKB = [math]::Round($deployedPackage.Length / 1024, 1)
+        Write-Host "  $($deployedPackage.Name)  (${sizeKB} KB)" -ForegroundColor Green
+    }
+} else {
+    Write-Host "`nWARNING: No packages were deployed to $env:LOCAL_NUGET_REPO" -ForegroundColor Yellow
 }

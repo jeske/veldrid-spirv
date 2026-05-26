@@ -1,8 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup Label="Nuget">
         <PackageId>ArtificialNecessity.Veldrid.SPIRV</PackageId>
-        <Version>0.0.0</Version>
         <IsPackable>true</IsPackable>
     </PropertyGroup>
 
@@ -15,11 +14,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="ArtificialNecessity.Veldrid" Version="4.9.4"/>
-        <PackageReference Update="Nerdbank.GitVersioning" Version="3.4.255">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-        </PackageReference>
+        <PackageReference Include="ArtificialNecessity.Veldrid" Version="$(ANVeldridVersion)"/>
     </ItemGroup>
 
     <ItemGroup>

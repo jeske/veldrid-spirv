@@ -1,0 +1,74 @@
+<Project>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       Dependency versions — edit here, all projects pick them up
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <PropertyGroup>
+    <ANVeldridVersion>5.260525.201836</ANVeldridVersion>
+  </PropertyGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       v2 Timestamp-Based Versioning
+       PackageVersion = {major}.{YYMMDD}.{HHmmss}  (NuGet, no ushort constraint)
+       AssemblyVersion = {major}.{YYMM}.{DDHH}.{mmss}  (PE/CLR ushort constraint)
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <PropertyGroup>
+    <VeldridSpirvMajorVersion>5</VeldridSpirvMajorVersion>
+    <!-- AssemblyVersion segments (ushort-constrained, split timestamp) -->
+    <_BuildYYMM>$([System.DateTime]::Now.ToString("yyMM"))</_BuildYYMM>
+    <_BuildDDHH>$([System.DateTime]::Now.ToString("ddHH"))</_BuildDDHH>
+    <_Buildmmss>$([System.DateTime]::Now.ToString("mmss"))</_Buildmmss>
+    <AssemblyVersion>$(VeldridSpirvMajorVersion).$(_BuildYYMM).$(_BuildDDHH).$(_Buildmmss)</AssemblyVersion>
+    <FileVersion>$(AssemblyVersion)</FileVersion>
+    <!-- PackageVersion segments (NuGet, no ushort constraint — full date+time) -->
+    <_BuildYYMMDD>$([System.DateTime]::Now.ToString("yyMMdd"))</_BuildYYMMDD>
+    <_BuildHHmmss>$([System.DateTime]::Now.ToString("HHmmss"))</_BuildHHmmss>
+    <Version>$(VeldridSpirvMajorVersion).$(_BuildYYMMDD).$(_BuildHHmmss)</Version>
+  </PropertyGroup>
+
+  <!-- Suppress SDK's automatic SourceRevisionId — we handle git hash ourselves -->
+  <PropertyGroup>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!-- Git short hash resolved at build time -->
+  <Target Name="_ResolveGitHash" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;BeforeBuild">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true"
+          StandardOutputImportance="low" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShortHash" />
+    </Exec>
+    <PropertyGroup>
+      <_GitShortHash Condition="'$(_GitShortHash)' == ''">unknown</_GitShortHash>
+      <InformationalVersion>$(AssemblyVersion)-$([System.Environment]::MachineName)+g$(_GitShortHash)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       Shared build configuration
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <RepositoryRootDirectory>$(MSBuildThisFileDirectory)</RepositoryRootDirectory>
+    <BinDir>$(RepositoryRootDirectory)bin</BinDir>
+    <OutputPath>$([System.IO.Path]::GetFullPath('$(RepositoryRootDirectory)bin\$(Configuration)'))\$(MSBuildProjectName)</OutputPath>
+    <BaseIntermediateOutputPath>$([System.IO.Path]::GetFullPath('$(RepositoryRootDirectory)bin\obj\$(MSBuildProjectName)'))\</BaseIntermediateOutputPath>
+    <PackageOutputPath>$(BinDir)\Packages\$(Configuration)</PackageOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageLicenseUrl>https://raw.githubusercontent.com/mellinoe/veldrid-spirv/master/LICENSE</PackageLicenseUrl>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Copyright>Copyright 2019 (c) Eric Mellino. All rights reserved.</Copyright>
+    <Authors>Eric Mellino</Authors>
+    <RepositoryUrl>https://github.com/mellinoe/veldrid-spirv</RepositoryUrl>
+  </PropertyGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       Prebuild version check — helpful error if someone uses the old workflow
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <Target Name="_WarnOldVersionJson" BeforeTargets="BeforeBuild"
+          Condition="Exists('$(RepositoryRootDirectory)version.json')">
+    <Warning Text="version.json is no longer used. This repo uses v2 timestamp versioning via VeldridSpirv.Build.props. You can delete version.json." />
+  </Target>
+
+</Project>

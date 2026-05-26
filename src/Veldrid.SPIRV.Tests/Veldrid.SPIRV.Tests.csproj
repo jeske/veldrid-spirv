@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -30,8 +30,5 @@
     <Content Include="$(RepositoryRootDirectory)/build/$(Configuration)/linux-x64/libveldrid-spirv.so" Condition="Exists('$(RepositoryRootDirectory)/build/$(Configuration)/linux-x64/libveldrid-spirv.so')" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Update="Nerdbank.GitVersioning" Version="3.4.255" />
-  </ItemGroup>
-
 </Project>
+
