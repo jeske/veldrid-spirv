@@ -1,4 +1,4 @@
-#!/usr/bin/env dotnet run
+#!/usr/bin/env -S dotnet run
 // publish-local.cs — Build and pack Veldrid.SPIRV package to local NuGet feed (macOS/Linux)
 //
 // Versioning is timestamp-based (v2) — every build gets a unique version

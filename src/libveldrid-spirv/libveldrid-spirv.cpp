@@ -3,6 +3,7 @@
 
 #include "libveldrid-spirv.hpp"
 #include "InteropStructs.hpp"
+#include <cstdint>
 #include <fstream>
 #include "spirv_hlsl.hpp"
 #include "spirv_glsl.hpp"
