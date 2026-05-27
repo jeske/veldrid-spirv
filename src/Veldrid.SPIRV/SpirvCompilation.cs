@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Veldrid.SPIRV
@@ -11,6 +12,29 @@ namespace Veldrid.SPIRV
         static SpirvCompilation()
         {
             VeldridSpirvNative.SetupLibraryResolvers();
+            ValidateNativeAbiVersion();
+        }
+
+        private static void ValidateNativeAbiVersion()
+        {
+            uint nativeVersion = VeldridSpirvNative.GetAbiVersion();
+            if (nativeVersion != NativeAbiVersion.Expected)
+            {
+                string buildInfo = "unknown";
+                try
+                {
+                    IntPtr ptr = VeldridSpirvNative.GetBuildInfo();
+                    if (ptr != IntPtr.Zero)
+                        buildInfo = Marshal.PtrToStringAnsi(ptr) ?? "unknown";
+                }
+                catch { /* GetBuildInfo may not exist in very old DLLs */ }
+
+                throw new SpirvCompilationException(
+                    $"Native libveldrid-spirv ABI version mismatch. " +
+                    $"Expected version {NativeAbiVersion.Expected}, but loaded native library reports version {nativeVersion}. " +
+                    $"Native build info: \"{buildInfo}\". " +
+                    $"You need to rebuild the native library (build-native.cmd release win-x64).");
+            }
         }
 
         /// <summary>

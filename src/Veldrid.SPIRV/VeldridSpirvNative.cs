@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Veldrid.SPIRV
 {
@@ -26,5 +27,11 @@ namespace Veldrid.SPIRV
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void FreeResult(CompilationResult* result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern uint GetAbiVersion();
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr GetBuildInfo();
     }
 }

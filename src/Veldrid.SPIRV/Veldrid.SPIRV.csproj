@@ -64,6 +64,19 @@
         </None>
     </ItemGroup>
 
+    <!-- Generate ABI version constant from the single-source NATIVE_ABI_VERSION file -->
+    <Target Name="_GenerateAbiVersionSource" BeforeTargets="CoreCompile">
+        <PropertyGroup>
+            <_AbiVersionGenDir>$(IntermediateOutputPath)Generated\</_AbiVersionGenDir>
+            <_AbiVersionGenFile>$(_AbiVersionGenDir)NativeAbiVersion.g.cs</_AbiVersionGenFile>
+        </PropertyGroup>
+        <MakeDir Directories="$(_AbiVersionGenDir)" />
+        <WriteLinesToFile File="$(_AbiVersionGenFile)" Overwrite="true" Lines="namespace Veldrid.SPIRV { internal static class NativeAbiVersion { public const uint Expected = $(NativeAbiVersion)%3B } }" />
+        <ItemGroup>
+            <Compile Include="$(_AbiVersionGenFile)" />
+        </ItemGroup>
+    </Target>
+
     <PropertyGroup>
         <Description>Veldrid integration for the SPIRV-Cross native library. Contains functionality to cross-compile SPIR-V bytecode into HLSL, GLSL, ESSL, and MSL shaders for use with Veldrid.</Description>
         <PackageTags>3D Graphics Direct3D DirectX Vulkan OpenGL Metal Core Standard Game</PackageTags>

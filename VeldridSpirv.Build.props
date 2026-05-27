@@ -4,7 +4,7 @@
        Dependency versions — edit here, all projects pick them up
        ═══════════════════════════════════════════════════════════════════════════ -->
   <PropertyGroup>
-    <ANVeldridVersion>5.260526.172036</ANVeldridVersion>
+    <ANVeldridVersion>5.260526.205349</ANVeldridVersion>
   </PropertyGroup>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════
@@ -62,6 +62,20 @@
     <Authors>Eric Mellino</Authors>
     <RepositoryUrl>https://github.com/mellinoe/veldrid-spirv</RepositoryUrl>
   </PropertyGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       Native ABI version — single source of truth from NATIVE_ABI_VERSION file
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <PropertyGroup>
+    <NativeAbiVersionFile>$(RepositoryRootDirectory)NATIVE_ABI_VERSION</NativeAbiVersionFile>
+    <NativeAbiVersion Condition="Exists('$(NativeAbiVersionFile)')">$([System.IO.File]::ReadAllText('$(NativeAbiVersionFile)').Trim())</NativeAbiVersion>
+    <NativeAbiVersion Condition="'$(NativeAbiVersion)' == ''">0</NativeAbiVersion>
+  </PropertyGroup>
+
+  <Target Name="_WarnMissingAbiVersion" BeforeTargets="BeforeBuild"
+          Condition="!Exists('$(NativeAbiVersionFile)')">
+    <Warning Text="NATIVE_ABI_VERSION file not found at '$(NativeAbiVersionFile)'. ABI version will default to 0." />
+  </Target>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════
        Prebuild version check — helpful error if someone uses the old workflow

@@ -761,6 +761,26 @@ VD_EXPORT void FreeResult(CompilationResult *result)
     delete result;
 }
 
+VD_EXPORT uint32_t GetAbiVersion()
+{
+    return VELDRID_SPIRV_ABI_VERSION;
+}
+
+// Build info string: "YYYY-MM-DD HH:MM:SS <git-hash>"
+// __DATE__ gives "Mmm DD YYYY", __TIME__ gives "HH:MM:SS"
+// GIT_SHORT_HASH is optionally defined via CMake (-DGIT_SHORT_HASH=...)
+#ifndef GIT_SHORT_HASH
+#define GIT_SHORT_HASH "unknown"
+#endif
+
+static const char BuildInfoString[] =
+    __DATE__ " " __TIME__ " g" GIT_SHORT_HASH;
+
+VD_EXPORT const char* GetBuildInfo()
+{
+    return BuildInfoString;
+}
+
 const VertexElementFormat FloatFormats[] =
     {
         VertexElementFormat::Float1,

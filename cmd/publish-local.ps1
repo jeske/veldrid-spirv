@@ -74,6 +74,27 @@ if (-not (Test-Path $requiredDll)) {
     exit 1
 }
 
+# ── Verify native DLL ABI version ──────────────────────────────────────────────
+# Load the ABI version expected by managed code from the single-source file.
+$abiVersionFile = Join-Path $repoRoot 'NATIVE_ABI_VERSION'
+if (-not (Test-Path $abiVersionFile)) {
+    Write-Error "NATIVE_ABI_VERSION file not found at '$abiVersionFile'."
+    exit 1
+}
+$expectedAbi = (Get-Content $abiVersionFile -Raw).Trim()
+Write-Host "`nVerifying native ABI version (expected: $expectedAbi)..." -ForegroundColor Cyan
+
+$abiCheckProject = Join-Path $repoRoot 'src\Veldrid.SPIRV.AbiCheck\Veldrid.SPIRV.AbiCheck.csproj'
+$nativeDllDir = Join-Path $repoRoot "build\Release\win-x64"
+
+dotnet run --project $abiCheckProject -- $nativeDllDir $expectedAbi
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Error "Native ABI version check FAILED. The native DLL does not match the expected ABI version. Rebuild with: build-native.cmd release win-x64"
+    exit 1
+}
+Write-Host ""
+
 # Capture timestamp ONCE so the build and pack get the exact same version
 $now = [System.DateTime]::Now
 $buildYYMM   = $now.ToString('yyMM')
