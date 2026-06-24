@@ -8,7 +8,11 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# CMake 4.x hard-errors on subprojects with cmake_minimum_required < 3.17.
+# Rather than patching each submodule, raise their effective policy floor.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.17)
 add_subdirectory(ext/SPIRV-Cross)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
 
 set(SHADERC_SKIP_TESTS ON)
 set(SHADERC_SKIP_INSTALL ON)
