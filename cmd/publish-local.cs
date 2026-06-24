@@ -44,6 +44,10 @@ if (string.IsNullOrEmpty(localNuGetFeedPath))
 WriteColored($"\n=== Veldrid.SPIRV publish-local ({configuration}) ===", ConsoleColor.Cyan);
 WriteColored($"Local NuGet feed: {localNuGetFeedPath}", ConsoleColor.DarkGray);
 
+// ─── Check SPIRV-Cross submodule freshness ──────────────────────────────────────
+
+CheckSubmoduleFreshness(repoRoot);
+
 // ─── Locate native libraries ────────────────────────────────────────────────
 // The csproj picks up native assets from build/<Configuration>/<rid>/.
 // We build the native library in Release, but may pack the managed assembly in
