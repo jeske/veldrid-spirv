@@ -1,6 +1,11 @@
 @setlocal
 @echo off
 
+rem Clear .NET SDK MSBuild env vars that can poison VS MSBuild's VCTargetsPath resolution
+set MSBUILD_EXE_PATH=
+set MSBuildSDKsPath=
+set MSBuildExtensionsPath=
+
 set _CMAKE_BUILD_TYPE=Debug
 set _BUILD_ARCH=x64
 set _CMAKE_GENERATOR_PLATFORM=x64
@@ -31,7 +36,7 @@ if defined _NDK_DIR (
   set _OS_DIR=android
   set _BUILD_ARCH=%_ANDROID_ABI%
 ) else (
-  set _CMAKE_ARGS=%_CMAKE_ARGS% -DCMAKE_GENERATOR_PLATFORM=%_CMAKE_GENERATOR_PLATFORM%
+  set _CMAKE_ARGS=%_CMAKE_ARGS% -G "Visual Studio 17 2022" -DCMAKE_GENERATOR_PLATFORM=%_CMAKE_GENERATOR_PLATFORM%
   set _OS_DIR=win
 )
 
