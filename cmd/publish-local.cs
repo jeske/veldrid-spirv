@@ -247,3 +247,40 @@ static void RunOrExit(string fileName, string arguments)
         Environment.Exit(proc.ExitCode);
     }
 }
+
+/// <summary>Warn if the SPIRV-Cross submodule checkout differs from the commit recorded in the repo.</summary>
+static void CheckSubmoduleFreshness(string repoRoot)
+{
+    try
+    {
+        var psi = new ProcessStartInfo("git", "submodule status ext/SPIRV-Cross")
+        {
+            WorkingDirectory = repoRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var proc = Process.Start(psi);
+        if (proc == null) return;
+        string output = proc.StandardOutput.ReadToEnd().Trim();
+        proc.WaitForExit();
+
+        if (proc.ExitCode != 0 || output.Length == 0)
+        {
+            WriteColored("  Submodule check: unable to query git submodule status (skipped)", ConsoleColor.Yellow);
+            return;
+        }
+
+        char flag = output[0];
+        if (flag == '-')
+            WriteColored("  WARNING: ext/SPIRV-Cross submodule is NOT initialized (run: git submodule update --init)", ConsoleColor.Yellow);
+        else if (flag == '+')
+            WriteColored("  WARNING: ext/SPIRV-Cross checkout differs from the recorded commit — native build may be stale", ConsoleColor.Yellow);
+        else
+            WriteColored("  Submodule ext/SPIRV-Cross: up to date", ConsoleColor.DarkGray);
+    }
+    catch (Exception ex)
+    {
+        WriteColored($"  Submodule check failed: {ex.Message} (continuing)", ConsoleColor.Yellow);
+    }
+}
