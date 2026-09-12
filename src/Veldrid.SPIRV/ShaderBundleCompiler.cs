@@ -83,25 +83,32 @@ namespace Veldrid.SPIRV
             foreach (var target in AllTargets)
             {
                 var result = SpirvCompilation.CompileVertexFragment(vsSpirv, fsSpirv, target, options);
-
-                byte[] vsOut = Encoding.UTF8.GetBytes(result.VertexShader ?? "");
-                byte[] fsOut = Encoding.UTF8.GetBytes(result.FragmentShader ?? "");
-                byte[] combined = new byte[vsOut.Length + fsOut.Length];
-                Buffer.BlockCopy(vsOut, 0, combined, 0, vsOut.Length);
-                Buffer.BlockCopy(fsOut, 0, combined, vsOut.Length, fsOut.Length);
-
                 GraphicsBackend backend = TargetToBackend(target);
                 string vertexEntry = target == CrossCompileTarget.MSL ? "main0" : "main";
                 string fragmentEntry = target == CrossCompileTarget.MSL ? "main0" : "main";
 
+                // Direct3D11: DXBC bytecode when d3dcompiler is available (Windows), else HLSL text. Other targets: cross-compiled source text.
+                byte[] vsOut, fsOut; string format;
+                if (target == CrossCompileTarget.HLSL)
+                {
+                    (vsOut, format) = Direct3D11StagePayload(result.VertexShader ?? "", vertexEntry, ShaderStages.Vertex, shaderName);
+                    (fsOut, _) = Direct3D11StagePayload(result.FragmentShader ?? "", fragmentEntry, ShaderStages.Fragment, shaderName);
+                }
+                else
+                {
+                    vsOut = Encoding.UTF8.GetBytes(result.VertexShader ?? "");
+                    fsOut = Encoding.UTF8.GetBytes(result.FragmentShader ?? "");
+                    format = GetShaderFormat(target);
+                }
+
                 bundle.Backends[VeldridShaderBundle.GetBackendKey(backend)] = new VdShaderBackendData
                 {
-                    ShaderFormat = GetShaderFormat(target),
+                    ShaderFormat = format,
                     VertexEntryPoint = vertexEntry,
                     FragmentEntryPoint = fragmentEntry,
                     VertexShaderData = Convert.ToBase64String(vsOut),
                     FragmentShaderData = Convert.ToBase64String(fsOut),
-                    OutputHash = ComputeSha256(combined),
+                    OutputHash = ComputeSha256(Concat(vsOut, fsOut)),
                 };
 
                 // Capture reflection from first successful compile (same for all targets)
@@ -197,14 +204,19 @@ namespace Veldrid.SPIRV
             foreach (var target in AllTargets)
             {
                 var result = SpirvCompilation.CompileCompute(csSpirv, target, options);
-                byte[] csOut = Encoding.UTF8.GetBytes(result.ComputeShader ?? "");
-
                 GraphicsBackend backend = TargetToBackend(target);
                 string entry = target == CrossCompileTarget.MSL ? "main0" : "main";
 
+                // Direct3D11: DXBC bytecode when d3dcompiler is available (Windows), else HLSL text. Other targets: cross-compiled source text.
+                byte[] csOut; string format;
+                if (target == CrossCompileTarget.HLSL)
+                    (csOut, format) = Direct3D11StagePayload(result.ComputeShader ?? "", entry, ShaderStages.Compute, shaderName);
+                else
+                    (csOut, format) = (Encoding.UTF8.GetBytes(result.ComputeShader ?? ""), GetShaderFormat(target));
+
                 bundle.Backends[VeldridShaderBundle.GetBackendKey(backend)] = new VdShaderBackendData
                 {
-                    ShaderFormat = GetShaderFormat(target),
+                    ShaderFormat = format,
                     ComputeEntryPoint = entry,
                     ComputeShaderData = Convert.ToBase64String(csOut),
                     OutputHash = ComputeSha256(csOut),
@@ -255,6 +267,57 @@ namespace Veldrid.SPIRV
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// HLSL text → DXBC (Direct3D shader bytecode) via d3dcompiler_47, at BUNDLE-BUILD time. Without this the D3D11 slot ships
+        /// <c>hlsl_text</c> and Veldrid's <c>D3D11Shader</c> runs <c>D3DCompile</c> on every launch — measured at 2.76 s of a 3.0 s
+        /// PixelStudio start for SilkyNvg's 29-blend-mode fragment shaders. DXBC is hardware-independent (bound to the shader model, not
+        /// the GPU; the driver translates it to ISA at <c>Create*Shader</c>), so it is as portable within D3D11 as SPIR-V is within Vulkan.
+        /// Profile/flags mirror <c>D3D11Shader.compileCode</c>'s feature-level-11 branch exactly (vs/ps/cs_5_0, OptimizationLevel3), so the
+        /// bytecode is what the runtime would have produced. Windows-only (d3dcompiler is a Windows DLL): elsewhere the caller keeps hlsl_text.
+        /// A compile error throws — it is the same error the runtime compile would have raised, surfaced at build time instead.
+        /// </summary>
+        private static byte[] CompileHlslToDxbc(string hlslSource, string entryPoint, ShaderStages stage, string shaderName)
+        {
+            string profile = stage switch
+            {
+                ShaderStages.Vertex => "vs_5_0",
+                ShaderStages.Fragment => "ps_5_0",
+                ShaderStages.Compute => "cs_5_0",
+                ShaderStages.Geometry => "gs_5_0",
+                ShaderStages.TessellationControl => "hs_5_0",
+                ShaderStages.TessellationEvaluation => "ds_5_0",
+                _ => throw new SpirvCompilationException($"No DXBC profile for stage {stage}"),
+            };
+            byte[] hlslBytes = Encoding.UTF8.GetBytes(hlslSource);
+            Vortice.D3DCompiler.Compiler.Compile(hlslBytes, null!, null!, entryPoint, null!, profile,
+                Vortice.D3DCompiler.ShaderFlags.OptimizationLevel3, out var result, out var error);
+            if (result == null)
+            {
+                string message = error != null ? Encoding.ASCII.GetString(error.AsBytes()) : "(no compiler output)";
+                throw new SpirvCompilationException($"HLSL → DXBC failed for {shaderName} {stage} ({profile}): {message}");
+            }
+            return result.AsBytes();
+        }
+
+        /// <summary>
+        /// The Direct3D11 slot's payload for one stage: DXBC bytecode when d3dcompiler is available (Windows), else the HLSL text the
+        /// runtime will compile itself. Returns the format tag alongside so the two can never disagree.
+        /// </summary>
+        private static (byte[] Data, string Format) Direct3D11StagePayload(string hlslSource, string entryPoint, ShaderStages stage, string shaderName)
+        {
+            if (OperatingSystem.IsWindows())
+                return (CompileHlslToDxbc(hlslSource, entryPoint, stage, shaderName), "dxbc");
+            return (Encoding.UTF8.GetBytes(hlslSource), "hlsl_text");
+        }
+
+        private static byte[] Concat(byte[] first, byte[] second)
+        {
+            byte[] combined = new byte[first.Length + second.Length];
+            Buffer.BlockCopy(first, 0, combined, 0, first.Length);
+            Buffer.BlockCopy(second, 0, combined, first.Length, second.Length);
+            return combined;
+        }
 
         private static GraphicsBackend TargetToBackend(CrossCompileTarget target) => target switch
         {
