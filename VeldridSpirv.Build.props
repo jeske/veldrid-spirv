@@ -4,7 +4,7 @@
        Dependency versions — edit here, all projects pick them up
        ═══════════════════════════════════════════════════════════════════════════ -->
   <PropertyGroup>
-    <ANVeldridVersion>5.260526.205349</ANVeldridVersion>
+    <ANVeldridVersion>5.260914.171621</ANVeldridVersion>
   </PropertyGroup>
 
   <!-- ═══════════════════════════════════════════════════════════════════════════
