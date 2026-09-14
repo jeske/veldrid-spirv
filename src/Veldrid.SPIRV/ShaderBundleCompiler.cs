@@ -49,15 +49,12 @@ namespace Veldrid.SPIRV
             byte[] vsSpirv = vsSpirvResult.SpirvBytes;
             byte[] fsSpirv = fsSpirvResult.SpirvBytes;
 
-            // Build the bundle
-            var now = DateTimeOffset.Now;
+            // Build the bundle. No timestamp: output is a pure function of the inputs (bit-reproducible).
             var bundle = new VeldridShaderBundle
             {
                 ShaderName = shaderName,
                 VertexSource = vertexSourceFile,
                 FragmentSource = fragmentSourceFile,
-                CompiledAt = now.ToString("o"),
-                CompiledAtEpoch = now.ToUnixTimeSeconds(),
             };
 
             // Input hash from SPIR-V
@@ -179,13 +176,10 @@ namespace Veldrid.SPIRV
                 computeGlsl, computeSourceFile ?? "<compute>", ShaderStages.Compute, new GlslCompileOptions());
             byte[] csSpirv = csSpirvResult.SpirvBytes;
 
-            var now = DateTimeOffset.Now;
             var bundle = new VeldridShaderBundle
             {
                 ShaderName = shaderName,
                 ComputeSource = computeSourceFile,
-                CompiledAt = now.ToString("o"),
-                CompiledAtEpoch = now.ToUnixTimeSeconds(),
                 InputHash = ComputeSha256(csSpirv),
             };
 
