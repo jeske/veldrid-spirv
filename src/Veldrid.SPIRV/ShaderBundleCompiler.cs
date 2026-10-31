@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -118,6 +119,10 @@ namespace Veldrid.SPIRV
             if (capturedReflection != null)
                 ShaderInterfaceVerifier.ThrowIfViolated(shaderName, capturedReflection.Interface);
 
+            // D5: the bundle carries its interface so pipeline creation can verify the application against it BY NAME (V7, in Veldrid).
+            if (capturedReflection != null)
+                bundle.Interface = ToBundleInterface(capturedReflection);
+
             // Populate ResourceLayoutDescriptions from reflection
             if (capturedReflection != null)
             {
@@ -228,6 +233,7 @@ namespace Veldrid.SPIRV
             // Populate ResourceLayoutDescriptions
             if (capturedReflection != null)
             {
+                // (D5 for compute - interface = blocks + resources only - is assigned after this block.)
                 bundle.ResourceLayoutDescriptions = new VdShaderResourceLayout[capturedReflection.ResourceLayouts.Length];
                 for (int i = 0; i < capturedReflection.ResourceLayouts.Length; i++)
                 {
@@ -264,6 +270,55 @@ namespace Veldrid.SPIRV
             }
 
             return bundle;
+        }
+
+        /// <summary>
+        /// The reflected interface as the bundle stores it (D5): vertex inputs (from <see cref="SpirvReflection.VertexElements"/>),
+        /// varyings, and uniform blocks MERGED per (set, binding) with their stages OR-ed (V6b already proved the stages agree).
+        /// </summary>
+        private static VdShaderInterface ToBundleInterface(SpirvReflection reflection)
+        {
+            var itf = reflection.Interface;
+            var vertexInputs = new List<VdShaderVertexInput>();
+            for (int location = 0; location < reflection.VertexElements.Length; location++)
+            {
+                var ve = reflection.VertexElements[location];
+                if (string.IsNullOrEmpty(ve.Name)) continue;   // a hole in the location range (nothing declared there)
+                vertexInputs.Add(new VdShaderVertexInput { Name = ve.Name, Location = (uint)location, Format = ve.Format });
+            }
+
+            static VdShaderVarying[] Varyings(ShaderInterface_Varying[] source)
+            {
+                var result = new VdShaderVarying[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                    result[i] = new VdShaderVarying { Name = source[i].Name, Location = source[i].Location, Type = source[i].TypeText, Flat = source[i].Flat };
+                return result;
+            }
+
+            var blocks = new List<VdShaderUniformBlock>();
+            foreach (var group in itf.UniformBlocks.GroupBy(b => (b.Set, b.Binding)).OrderBy(g => g.Key.Set).ThenBy(g => g.Key.Binding))
+            {
+                var first = group.First();
+                ShaderStages stages = ShaderStages.None;
+                foreach (var b in group) stages |= b.Stages;
+                blocks.Add(new VdShaderUniformBlock
+                {
+                    Name = first.BlockName,
+                    Set = first.Set,
+                    Binding = first.Binding,
+                    SizeBytes = first.SizeBytes,
+                    Stages = stages,
+                    Members = first.Members.Select(m => new VdShaderUniformMember { Name = m.Name, Type = m.GlslType, OffsetBytes = m.OffsetBytes, SizeBytes = m.SizeBytes }).ToArray(),
+                });
+            }
+
+            return new VdShaderInterface
+            {
+                VertexInputs = vertexInputs.ToArray(),
+                VertexOutputs = Varyings(itf.VertexOutputs),
+                FragmentInputs = Varyings(itf.FragmentInputs),
+                UniformBlocks = blocks.ToArray(),
+            };
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────────

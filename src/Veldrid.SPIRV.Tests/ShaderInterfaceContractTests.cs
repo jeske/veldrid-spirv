@@ -48,6 +48,27 @@ namespace Veldrid.SPIRV.Tests
         }
 
         [Fact]
+        public void Bundle_CarriesInterface_ByName_AndRoundTrips()
+        {
+            // D5: the bundle is self-describing - vertex inputs, both varying sets, merged uniform blocks - and format version 2.
+            string vert = Fixture("ChunkInstanced.vert.glsl");
+            string frag = Fixture("ChunkInstanced_GBuffer.frag.glsl");
+            var bundle = ShaderBundleCompiler.CompileVertexFragment(vert, frag, "ChunkInstanced_GBuffer");
+            var back = VeldridShaderBundle.Deserialize(bundle.Serialize());
+
+            Assert.Equal(VeldridShaderBundle.CurrentFormatVersion, back.Version);
+            Assert.Equal(new[] { "CornerOffset", "Color" }, back.Interface.VertexInputs.Select(i => i.Name).ToArray());
+            Assert.Equal(VertexElementFormat.Float2, back.Interface.VertexInputs[0].Format);
+            Assert.Equal(7, back.Interface.VertexOutputs.Length);
+            Assert.Equal(7, back.Interface.FragmentInputs.Length);
+            Assert.Equal("flat vec2", back.Interface.FragmentInputs.Single(v => v.Name == "fragGridTile").Type);
+            var origin = back.Interface.UniformBlocks.Single(b => b.Name == "ChunkOriginBuffer");
+            Assert.Equal(ShaderStages.Vertex, origin.Stages);
+            Assert.Equal(20u, origin.Members.Single(m => m.Name == "PixelsPerTile").OffsetBytes);
+            Assert.Single(back.Interface.UniformBlocks, b => b.Name == "TilePlaneParams" && b.Set == 5 && b.Binding == 0 && b.SizeBytes == 48);
+        }
+
+        [Fact]
         public void ArcaneSiege_ChunkInstanced_GBuffer_DeclaredButUnreadVarying_Passes()
         {
             // FINDING 2026-10-31 (S1 gate): the GBuffer fragment DECLARES all seven varyings but never READS fragVertexLightColor
