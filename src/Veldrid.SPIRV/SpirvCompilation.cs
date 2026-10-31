@@ -192,7 +192,8 @@ namespace Veldrid.SPIRV
                     SpirvReflection reflection = new SpirvReflection(
                         vertexElements,
                         layouts,
-                        bindingMap);
+                        bindingMap,
+                        ReadInterface(reflInfo));
 
                     return new VertexFragmentCompilationResult(vsCode, fsCode, reflection);
                 }
@@ -311,7 +312,8 @@ namespace Veldrid.SPIRV
                     SpirvReflection reflection = new SpirvReflection(
                         Array.Empty<VertexElementDescription>(),
                         layouts,
-                        bindingMap);
+                        bindingMap,
+                        ReadInterface(reflInfo));
 
                     return new ComputeCompilationResult(csCode, reflection);
                 }
@@ -323,6 +325,56 @@ namespace Veldrid.SPIRV
                     }
                 }
             }
+        }
+
+        /// <summary>Marshal the ABI-2 interface arrays (varyings, uniform blocks) out of the native reflection block.</summary>
+        private static unsafe ShaderBundleInterface ReadInterface(ReflectionInfo* reflInfo)
+        {
+            ShaderInterface_Varying[] vertexOutputs = ReadVaryings(ref reflInfo->VertexOutputs);
+            ShaderInterface_Varying[] fragmentInputs = ReadVaryings(ref reflInfo->FragmentInputs);
+
+            ShaderInterface_UniformBlock[] blocks = new ShaderInterface_UniformBlock[reflInfo->UniformBlocks.Count];
+            for (uint i = 0; i < reflInfo->UniformBlocks.Count; i++)
+            {
+                ref NativeUniformBlockDescription nb = ref reflInfo->UniformBlocks.Ref<NativeUniformBlockDescription>(i);
+                ShaderInterface_UniformMember[] members = new ShaderInterface_UniformMember[nb.Members.Count];
+                for (uint m = 0; m < nb.Members.Count; m++)
+                {
+                    ref NativeUniformMemberDescription nm = ref nb.Members.Ref<NativeUniformMemberDescription>(m);
+                    members[m] = new ShaderInterface_UniformMember(
+                        Util.GetString((byte*)nm.Name.Data, nm.Name.Count),
+                        Util.GetString((byte*)nm.GlslType.Data, nm.GlslType.Count),
+                        nm.OffsetBytes,
+                        nm.SizeBytes);
+                }
+                blocks[i] = new ShaderInterface_UniformBlock(
+                    Util.GetString((byte*)nb.BlockName.Data, nb.BlockName.Count),
+                    nb.Set,
+                    nb.Binding,
+                    nb.SizeBytes,
+                    nb.Stages,
+                    members);
+            }
+
+            return new ShaderBundleInterface(vertexOutputs, fragmentInputs, blocks);
+        }
+
+        private static unsafe ShaderInterface_Varying[] ReadVaryings(ref InteropArray native)
+        {
+            ShaderInterface_Varying[] result = new ShaderInterface_Varying[native.Count];
+            for (uint i = 0; i < native.Count; i++)
+            {
+                ref NativeVaryingDescription nv = ref native.Ref<NativeVaryingDescription>(i);
+                result[i] = new ShaderInterface_Varying(
+                    Util.GetString((byte*)nv.Name.Data, nv.Name.Count),
+                    nv.Location,
+                    nv.Scalar,
+                    nv.VecSize,
+                    nv.Columns,
+                    nv.ArrayLength,
+                    nv.Flat);
+            }
+            return result;
         }
 
         /// <summary>

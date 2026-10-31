@@ -112,6 +112,12 @@ namespace Veldrid.SPIRV
                 capturedReflection ??= result.Reflection;
             }
 
+            // THE CONTRACT (BUGFIX_ShaderInterfaceContract_NameVerified D2/D4): the two compiled stages must describe the same interface
+            // by NAME. This runs on every compile - precompile tool and runtime are this same call - and a violation is an exception,
+            // never a warning. (Reflection is target-independent; the first target's is used.)
+            if (capturedReflection != null)
+                ShaderInterfaceVerifier.ThrowIfViolated(shaderName, capturedReflection.Interface);
+
             // Populate ResourceLayoutDescriptions from reflection
             if (capturedReflection != null)
             {

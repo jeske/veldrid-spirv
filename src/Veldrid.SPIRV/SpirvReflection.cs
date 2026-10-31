@@ -30,6 +30,12 @@ namespace Veldrid.SPIRV
         public BindingMapEntry[] BindingMap { get; }
 
         /// <summary>
+        /// The compiled stage interface by NAME: vertex outputs, fragment inputs, uniform blocks with std140 members (ABI 2).
+        /// What <see cref="ShaderInterfaceVerifier"/> checks and the .vdshader bundle carries. Never null (<see cref="ShaderBundleInterface.Empty"/>).
+        /// </summary>
+        public ShaderBundleInterface Interface { get; }
+
+        /// <summary>
         /// Constructs a new <see cref="SpirvReflection"/> instance.
         /// </summary>
         /// <param name="vertexElements">An array containing a description of each vertex element that is used by
@@ -37,14 +43,17 @@ namespace Veldrid.SPIRV
         /// <param name="resourceLayouts">An array containing a description of each set of resources used by the
         /// compiled shader set.</param>
         /// <param name="bindingMap">An array containing the flat binding map entries from cross-compilation.</param>
+        /// <param name="shaderInterface">The compiled stage interface (varyings, uniform blocks); null = empty.</param>
         public SpirvReflection(
             VertexElementDescription[] vertexElements,
             ResourceLayoutDescription[] resourceLayouts,
-            BindingMapEntry[] bindingMap = null)
+            BindingMapEntry[] bindingMap = null,
+            ShaderBundleInterface shaderInterface = null)
         {
             VertexElements = vertexElements;
             ResourceLayouts = resourceLayouts;
             BindingMap = bindingMap ?? Array.Empty<BindingMapEntry>();
+            Interface = shaderInterface ?? ShaderBundleInterface.Empty;
         }
     }
 }

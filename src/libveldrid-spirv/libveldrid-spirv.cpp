@@ -19,6 +19,147 @@ namespace Veldrid
 {
 void ReflectVertexInfo(const Compiler& compiler, const ShaderResources& resources, ReflectionInfo& info);
 
+// ---- Shader interface reflection (BUGFIX_ShaderInterfaceContract_NameVerified) ----------------------------------------------
+
+static InterfaceScalarType ToInterfaceScalar(const SPIRType &type)
+{
+    switch (type.basetype)
+    {
+    case SPIRType::Float: return InterfaceScalarType::Float;
+    case SPIRType::Int: return InterfaceScalarType::Int;
+    case SPIRType::UInt: return InterfaceScalarType::UInt;
+    case SPIRType::Boolean: return InterfaceScalarType::Bool;
+    case SPIRType::Double: return InterfaceScalarType::Double;
+    case SPIRType::Half: return InterfaceScalarType::Half;
+    default:
+        throw std::runtime_error("Unhandled SPIR-V scalar type in a stage interface variable or uniform member.");
+    }
+}
+
+// GLSL spelling of a type for the violation table: float, vec3, mat4, ivec2, uint, float[4], ...
+static std::string GlslTypeName(const Compiler &compiler, const SPIRType &type)
+{
+    std::string scalar;
+    switch (type.basetype)
+    {
+    case SPIRType::Float: scalar = "float"; break;
+    case SPIRType::Int: scalar = "int"; break;
+    case SPIRType::UInt: scalar = "uint"; break;
+    case SPIRType::Boolean: scalar = "bool"; break;
+    case SPIRType::Double: scalar = "double"; break;
+    case SPIRType::Half: scalar = "float16_t"; break;
+    case SPIRType::Struct: scalar = compiler.get_name(type.self); break;
+    default: scalar = "?"; break;
+    }
+    std::string name;
+    if (type.basetype == SPIRType::Struct || (type.vecsize == 1 && type.columns == 1))
+    {
+        name = scalar;
+    }
+    else
+    {
+        std::string prefix;
+        switch (type.basetype)
+        {
+        case SPIRType::Int: prefix = "i"; break;
+        case SPIRType::UInt: prefix = "u"; break;
+        case SPIRType::Boolean: prefix = "b"; break;
+        case SPIRType::Double: prefix = "d"; break;
+        default: prefix = ""; break;
+        }
+        if (type.columns > 1)
+        {
+            name = prefix + "mat" + std::to_string(type.columns);
+            if (type.columns != type.vecsize) name += "x" + std::to_string(type.vecsize);
+        }
+        else
+        {
+            name = prefix + "vec" + std::to_string(type.vecsize);
+        }
+    }
+    for (size_t i = 0; i < type.array.size(); i++)
+    {
+        name += "[" + (type.array_size_literal[i] ? std::to_string(type.array[i]) : std::string("?")) + "]";
+    }
+    return name;
+}
+
+static std::string InterfaceVariableName(const Compiler &compiler, const Resource &resource)
+{
+    std::string name = compiler.get_name(resource.id);
+    if (name.empty()) name = compiler.get_fallback_name(resource.id);
+    return name;
+}
+
+// The vertex `out` / fragment `in` set of one stage, by the author's names. Built-ins are not in stage_inputs/stage_outputs.
+static InteropArray<VaryingDescription> ReflectVaryings(const Compiler &compiler, const SmallVector<Resource> &variables)
+{
+    InteropArray<VaryingDescription> ret(static_cast<uint32_t>(variables.size()));
+    for (uint32_t i = 0; i < variables.size(); i++)
+    {
+        const Resource &var = variables[i];
+        const SPIRType &type = compiler.get_type(var.type_id);
+        std::string name = InterfaceVariableName(compiler, var);
+        ret[i].Name.CopyFrom(static_cast<uint32_t>(name.size()), name.c_str());
+        ret[i].Location = compiler.get_decoration(var.id, spv::DecorationLocation);
+        ret[i].Scalar = ToInterfaceScalar(type);
+        ret[i].VecSize = type.vecsize;
+        ret[i].Columns = type.columns;
+        ret[i].ArrayLength = type.array.empty() ? 0u : (type.array_size_literal[0] ? type.array[0] : 0u);
+        ret[i].Flat = Bool32(compiler.has_decoration(var.id, spv::DecorationFlat));
+    }
+    return ret;
+}
+
+// Every uniform block of one stage with the std140 placement the compiler actually laid out. One entry per stage occurrence;
+// the managed verifier merges per (Set, Binding) and checks that both stages describe the same block.
+static void ReflectUniformBlocks(const Compiler &compiler, const SmallVector<Resource> &uniformBuffers, ShaderStages stage,
+                                 std::vector<UniformBlockDescription *> &out)
+{
+    for (const Resource &ub : uniformBuffers)
+    {
+        const SPIRType &blockType = compiler.get_type(ub.base_type_id);
+        UniformBlockDescription *block = new UniformBlockDescription();
+        // ub.name is the block name for an anonymous-instance block ("uniform Foo { ... };"), which is the Veldrid convention.
+        std::string blockName = ub.name.empty() ? compiler.get_name(ub.base_type_id) : ub.name;
+        block->BlockName.CopyFrom(static_cast<uint32_t>(blockName.size()), blockName.c_str());
+        block->Set = compiler.get_decoration(ub.id, spv::DecorationDescriptorSet);
+        block->Binding = compiler.get_decoration(ub.id, spv::DecorationBinding);
+        block->SizeBytes = static_cast<uint32_t>(compiler.get_declared_struct_size(blockType));
+        block->Stages = stage;
+        block->Members.Resize(static_cast<uint32_t>(blockType.member_types.size()));
+        for (uint32_t m = 0; m < blockType.member_types.size(); m++)
+        {
+            std::string memberName = compiler.get_member_name(ub.base_type_id, m);
+            const SPIRType &memberType = compiler.get_type(blockType.member_types[m]);
+            std::string glslType = GlslTypeName(compiler, memberType);
+            block->Members[m].Name.CopyFrom(static_cast<uint32_t>(memberName.size()), memberName.c_str());
+            block->Members[m].GlslType.CopyFrom(static_cast<uint32_t>(glslType.size()), glslType.c_str());
+            block->Members[m].OffsetBytes = compiler.type_struct_member_offset(blockType, m);
+            block->Members[m].SizeBytes = static_cast<uint32_t>(compiler.get_declared_struct_member_size(blockType, m));
+        }
+        out.push_back(block);
+    }
+}
+
+// Move a vector of heap blocks into one InteropArray (element-wise move so the nested arrays keep single ownership).
+static InteropArray<UniformBlockDescription> CollectUniformBlocks(std::vector<UniformBlockDescription *> &blocks)
+{
+    InteropArray<UniformBlockDescription> ret(static_cast<uint32_t>(blocks.size()));
+    for (uint32_t i = 0; i < blocks.size(); i++)
+    {
+        ret[i].BlockName = std::move(blocks[i]->BlockName);
+        ret[i].Set = blocks[i]->Set;
+        ret[i].Binding = blocks[i]->Binding;
+        ret[i].SizeBytes = blocks[i]->SizeBytes;
+        ret[i].Stages = blocks[i]->Stages;
+        ret[i].Members = std::move(blocks[i]->Members);
+        delete blocks[i];
+    }
+    blocks.clear();
+    return ret;
+}
+
 struct BindingInfo
 {
     uint32_t Set;
@@ -345,6 +486,14 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     ShaderResources vsResources = vsCompiler->get_shader_resources();
     ShaderResources fsResources = fsCompiler->get_shader_resources();
 
+    // Interface reflection FIRST: AddResources below renames resources (NormalizeResourceNames) and the GLSL targets rename the
+    // varyings to vdspv_fsinN further down. The contract is checked against the author's names.
+    InteropArray<VaryingDescription> vertexOutputs = ReflectVaryings(*vsCompiler, vsResources.stage_outputs);
+    InteropArray<VaryingDescription> fragmentInputs = ReflectVaryings(*fsCompiler, fsResources.stage_inputs);
+    std::vector<UniformBlockDescription *> uniformBlocks;
+    ReflectUniformBlocks(*vsCompiler, vsResources.uniform_buffers, ShaderStages::Vertex, uniformBlocks);
+    ReflectUniformBlocks(*fsCompiler, fsResources.uniform_buffers, ShaderStages::Fragment, uniformBlocks);
+
     std::map<BindingInfo, ResourceInfo> allResources;
 
     AddResources(vsResources.uniform_buffers, vsCompiler, allResources, 0, info.NormalizeResourceNames);
@@ -515,6 +664,9 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
 
     ReflectVertexInfo(*vsCompiler, vsResources, result->Reflection);
     result->Reflection.ResourceLayouts = CreateResourceLayoutArray(allResources, false);
+    result->Reflection.VertexOutputs = std::move(vertexOutputs);
+    result->Reflection.FragmentInputs = std::move(fragmentInputs);
+    result->Reflection.UniformBlocks = CollectUniformBlocks(uniformBlocks);
 
     if (!bindingMapEntries.empty())
     {
@@ -539,6 +691,10 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
     SetSpecializations(csCompiler, info);
 
     ShaderResources csResources = csCompiler->get_shader_resources();
+
+    // Interface reflection first (before AddResources may rename): a compute interface is blocks + resources only (no varyings).
+    std::vector<UniformBlockDescription *> uniformBlocks;
+    ReflectUniformBlocks(*csCompiler, csResources.uniform_buffers, ShaderStages::Compute, uniformBlocks);
 
     std::map<BindingInfo, ResourceInfo> allResources;
 

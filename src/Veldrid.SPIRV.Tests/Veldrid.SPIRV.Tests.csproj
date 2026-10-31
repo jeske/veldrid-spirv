@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="TestShaders/*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="TestShaders/**" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(RepositoryRootDirectory)/build/$(Configuration)/win-x64/libveldrid-spirv.dll" Condition="Exists('$(RepositoryRootDirectory)/build/$(Configuration)/win-x64/libveldrid-spirv.dll')" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(RepositoryRootDirectory)/build/$(Configuration)/osx/libveldrid-spirv.dylib" Condition="Exists('$(RepositoryRootDirectory)/build/$(Configuration)/osx/libveldrid-spirv.dylib')" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(RepositoryRootDirectory)/build/$(Configuration)/linux-x64/libveldrid-spirv.so" Condition="Exists('$(RepositoryRootDirectory)/build/$(Configuration)/linux-x64/libveldrid-spirv.so')" CopyToOutputDirectory="PreserveNewest" />

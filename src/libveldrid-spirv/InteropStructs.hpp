@@ -253,11 +253,61 @@ struct BindingMapEntry
     uint32_t FlatIndex;
 };
 
+// ---- Shader interface reflection (BUGFIX_ShaderInterfaceContract_NameVerified, AN_Veldrid/_BUGFIX) ----
+// Read from the POST-OPTIMISATION SPIR-V of each stage, BEFORE any cross-compile renaming, so the names are the GLSL author's names.
+// Every field below is part of the native ABI (NATIVE_ABI_VERSION); mirror changes in ReflectionInfo.cs.
+
+enum class InterfaceScalarType : uint8_t
+{
+    Float = 0,
+    Int = 1,
+    UInt = 2,
+    Bool = 3,
+    Double = 4,
+    Half = 5,
+};
+
+// One stage varying: a vertex `out` or a fragment `in` at an explicit location.
+struct VaryingDescription
+{
+    InteropArray<char> Name;
+    uint32_t Location = 0;
+    InterfaceScalarType Scalar = InterfaceScalarType::Float;
+    uint32_t VecSize = 1;      // 1..4
+    uint32_t Columns = 1;      // >1 for matrices
+    uint32_t ArrayLength = 0;  // 0 = not an array
+    Bool32 Flat = Bool32(false);
+};
+
+// One member of a uniform block, with its std140 placement as the compiler laid it out.
+struct UniformMemberDescription
+{
+    InteropArray<char> Name;
+    InteropArray<char> GlslType;  // "mat4", "vec3", "float[4]" ... for the human-readable violation table
+    uint32_t OffsetBytes = 0;
+    uint32_t SizeBytes = 0;
+};
+
+// One uniform block as seen by ONE stage (the managed verifier merges per (Set, Binding) and checks the stages agree).
+struct UniformBlockDescription
+{
+    InteropArray<char> BlockName;
+    uint32_t Set = 0;
+    uint32_t Binding = 0;
+    uint32_t SizeBytes = 0;
+    ShaderStages Stages = ShaderStages::None;
+    InteropArray<UniformMemberDescription> Members;
+};
+
 struct ReflectionInfo
 {
     InteropArray<VertexElementDescription> VertexElements;
     InteropArray<ResourceLayoutDescription> ResourceLayouts;
     InteropArray<BindingMapEntry> BindingMap;
+    // ABI 2: the stage interface (empty arrays for compute, except UniformBlocks).
+    InteropArray<VaryingDescription> VertexOutputs;
+    InteropArray<VaryingDescription> FragmentInputs;
+    InteropArray<UniformBlockDescription> UniformBlocks;
 };
 
 struct CompilationResult
