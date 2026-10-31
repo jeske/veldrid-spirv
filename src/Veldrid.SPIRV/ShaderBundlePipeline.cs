@@ -20,6 +20,13 @@ namespace Veldrid.SPIRV
     }
 
     /// <summary>
+    /// How a GLSL source FILE becomes the text the compiler sees. The one per-consumer policy the pipeline accepts (where sources live and
+    /// how they include each other); everything after it - compile, verify, hash, serialise, cache - is the pipeline's. Default:
+    /// <see cref="ShaderBundlePipeline.DefaultSourceReader"/>. RenderKit passes its transitive <c>//#include</c> expander with search paths.
+    /// </summary>
+    public delegate string ShaderBundle_SourceReader(string sourceFilePath);
+
+    /// <summary>
     /// THE one path from GLSL to a cached .vdshader (AN_Veldrid/_BUGFIX/BUGFIX_ShaderInterfaceContract_NameVerified.md, D1):
     /// compile (D3: declared interface preserved) -> verify (V5b/V6b, exception on violation) -> serialise -> cache by input hash.
     /// A build tool (committed <c>Shaders/Compiled/</c>, embedded as resources) and a runtime source (a per-user cache directory)
@@ -59,11 +66,11 @@ namespace Veldrid.SPIRV
         /// Return the cached bundle for <paramref name="pair"/>, compiling and caching it first if the sources, compiler or format changed
         /// (or the file is missing). Returns the bundle file path. <paramref name="log"/> receives one human line per decision.
         /// </summary>
-        public static string GetOrBuild(string sourceDir, string cacheDir, ShaderBundle_SourcePair pair, Action<string> log = null, CrossCompileOptions options = null)
+        public static string GetOrBuild(string sourceDir, string cacheDir, ShaderBundle_SourcePair pair, Action<string> log = null, CrossCompileOptions options = null, ShaderBundle_SourceReader readSource = null)
         {
             Directory.CreateDirectory(cacheDir);
             var manifest = ReadHashManifest(cacheDir);
-            string path = GetOrBuildCore(sourceDir, cacheDir, pair, manifest, log, options, out _);
+            string path = GetOrBuildCore(sourceDir, cacheDir, pair, manifest, log, options, readSource, out _);
             WriteHashManifest(cacheDir, manifest);
             return path;
         }
@@ -72,7 +79,7 @@ namespace Veldrid.SPIRV
         /// Every <see cref="CompileShaders"/>-style tool in one call: build what is stale, keep what is current, optionally delete .vdshader
         /// files that no pair produces, rewrite the hash manifest in pair order. Returns the number of bundles compiled.
         /// </summary>
-        public static int GetOrBuildAll(string sourceDir, string cacheDir, IReadOnlyList<ShaderBundle_SourcePair> pairs, bool deleteOrphans, Action<string> log = null, CrossCompileOptions options = null)
+        public static int GetOrBuildAll(string sourceDir, string cacheDir, IReadOnlyList<ShaderBundle_SourcePair> pairs, bool deleteOrphans, Action<string> log = null, CrossCompileOptions options = null, ShaderBundle_SourceReader readSource = null)
         {
             Directory.CreateDirectory(cacheDir);
             var manifest = ReadHashManifest(cacheDir);
@@ -80,7 +87,7 @@ namespace Veldrid.SPIRV
             var fresh = new Dictionary<string, ShaderBundle_InputHash>(StringComparer.Ordinal);
             foreach (var pair in pairs)
             {
-                GetOrBuildCore(sourceDir, cacheDir, pair, manifest, log, options, out bool didCompile);
+                GetOrBuildCore(sourceDir, cacheDir, pair, manifest, log, options, readSource, out bool didCompile);
                 if (didCompile) compiled++;
                 fresh[pair.BundleName] = manifest[pair.BundleName];
             }
@@ -99,14 +106,15 @@ namespace Veldrid.SPIRV
             return compiled;
         }
 
-        private static string GetOrBuildCore(string sourceDir, string cacheDir, ShaderBundle_SourcePair pair, Dictionary<string, ShaderBundle_InputHash> manifest, Action<string> log, CrossCompileOptions options, out bool didCompile)
+        private static string GetOrBuildCore(string sourceDir, string cacheDir, ShaderBundle_SourcePair pair, Dictionary<string, ShaderBundle_InputHash> manifest, Action<string> log, CrossCompileOptions options, ShaderBundle_SourceReader readSource, out bool didCompile)
         {
             string vertexPath = Path.Combine(sourceDir, pair.VertexFile);
             string fragmentPath = Path.Combine(sourceDir, pair.FragmentFile);
             if (!File.Exists(vertexPath)) throw new FileNotFoundException($"Vertex shader source for bundle '{pair.BundleName}' not found", vertexPath);
             if (!File.Exists(fragmentPath)) throw new FileNotFoundException($"Fragment shader source for bundle '{pair.BundleName}' not found", fragmentPath);
-            string vertexGlsl = ResolveIncludes(File.ReadAllText(vertexPath, Encoding.UTF8), sourceDir);
-            string fragmentGlsl = ResolveIncludes(File.ReadAllText(fragmentPath, Encoding.UTF8), sourceDir);
+            readSource ??= DefaultSourceReader;
+            string vertexGlsl = readSource(vertexPath);
+            string fragmentGlsl = readSource(fragmentPath);
             ShaderBundle_InputHash hash = ComputeInputHash(pair, vertexGlsl, fragmentGlsl);
             string bundlePath = BundlePath(cacheDir, pair.BundleName);
 
@@ -129,6 +137,10 @@ namespace Veldrid.SPIRV
         /// <summary>Per-user runtime cache location for an application: <c>%LOCALAPPDATA%/ArtificialNecessity/ShaderCache/&lt;appName&gt;</c>.</summary>
         public static string DefaultRuntimeCacheDir(string appName)
             => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ArtificialNecessity", "ShaderCache", appName);
+
+        /// <summary>The default <see cref="ShaderBundle_SourceReader"/>: UTF-8 text with one-level <c>//#include</c> resolved against the file's directory.</summary>
+        public static string DefaultSourceReader(string sourceFilePath)
+            => ResolveIncludes(File.ReadAllText(sourceFilePath, Encoding.UTF8), Path.GetDirectoryName(sourceFilePath) ?? ".");
 
         /// <summary>
         /// The one source-level preprocessor the pipeline supports (SilkyNvg's convention): a line <c>//#include "file"</c> is replaced by the
