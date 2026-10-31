@@ -22,6 +22,8 @@ set(CMAKE_CXX_STANDARD 17)
 include_directories(ext/SPIRV-Cross)
 include_directories(ext/SPIRV-Cross/include)
 include_directories(ext/shaderc/libshaderc/include/shaderc)
+# D3 (AN_Veldrid/_BUGFIX/BUGFIX_ShaderInterfaceContract_NameVerified.md): libveldrid-spirv drives spirv-opt itself (interface-preserving ADCE).
+include_directories(ext/shaderc/third_party/spirv-tools/include)
 
 file(GLOB_RECURSE LIBVELDRID_SPIRV_SOURCES src/libveldrid-spirv/*.cpp src/libveldrid-spirv/*.hpp)
 
@@ -57,6 +59,7 @@ target_link_libraries(veldrid-spirv
     spirv-cross-msl
     spirv-cross-hlsl
     shaderc
+    SPIRV-Tools-opt
 )
 
 # macOS builds are expected to be dynamic libraries rather than frameworks,

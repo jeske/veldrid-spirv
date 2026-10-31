@@ -11,6 +11,7 @@
 #include <map>
 #include <sstream>
 #include "shaderc.hpp"
+#include "spirv-tools/optimizer.hpp"
 #include <iostream>
 
 using namespace spirv_cross;
@@ -829,6 +830,7 @@ CompilationResult *CompileGLSLToSPIRV(
     std::string fileName,
     const shaderc::CompileOptions &options)
 {
+    // (shaderc compiles at optimization_level_zero - see CompileGlslToSpirv; optimisation happens in OptimizeSpirvPreservingInterface.)
     shaderc::Compiler compiler;
     shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(sourceText, kind, fileName.c_str(), options);
 
@@ -843,6 +845,86 @@ CompilationResult *CompileGLSLToSPIRV(
     ret->DataBuffers.Resize(1);
     ret->DataBuffers[0].CopyFrom(length, (uint8_t *)result.begin());
     return ret;
+}
+
+// D3 (AN_Veldrid/_BUGFIX/BUGFIX_ShaderInterfaceContract_NameVerified.md): spirv-opt's performance pass list - the SAME list as
+// spvtools::Optimizer::RegisterPerformancePasses() in the pinned SPIRV-Tools (ext/known_good.json) - with every ADCE instance
+// created as CreateAggressiveDCEPass(/*preserve_interface*/ true), so a declared stage input/output is never eliminated.
+// Bindings are preserved through OptimizerOptions (same as shaderc's SetPreserveBindings path). Keep this list in sync with
+// optimizer.cpp when the SPIRV-Tools pin moves (a test compares debug vs optimised interfaces, so drift is caught).
+static void RegisterPerformancePassesPreservingInterface(spvtools::Optimizer &opt)
+{
+    const bool preserveInterface = true;
+    opt.RegisterPass(spvtools::CreateWrapOpKillPass())
+        .RegisterPass(spvtools::CreateDeadBranchElimPass())
+        .RegisterPass(spvtools::CreateMergeReturnPass())
+        .RegisterPass(spvtools::CreateInlineExhaustivePass())
+        .RegisterPass(spvtools::CreateEliminateDeadFunctionsPass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreatePrivateToLocalPass())
+        .RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass())
+        .RegisterPass(spvtools::CreateLocalSingleStoreElimPass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateScalarReplacementPass())
+        .RegisterPass(spvtools::CreateLocalAccessChainConvertPass())
+        .RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass())
+        .RegisterPass(spvtools::CreateLocalSingleStoreElimPass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateLocalMultiStoreElimPass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateCCPPass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateLoopUnrollPass(true))
+        .RegisterPass(spvtools::CreateDeadBranchElimPass())
+        .RegisterPass(spvtools::CreateRedundancyEliminationPass())
+        .RegisterPass(spvtools::CreateCombineAccessChainsPass())
+        .RegisterPass(spvtools::CreateSimplificationPass())
+        .RegisterPass(spvtools::CreateScalarReplacementPass())
+        .RegisterPass(spvtools::CreateLocalAccessChainConvertPass())
+        .RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass())
+        .RegisterPass(spvtools::CreateLocalSingleStoreElimPass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateSSARewritePass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateVectorDCEPass())
+        .RegisterPass(spvtools::CreateDeadInsertElimPass())
+        .RegisterPass(spvtools::CreateDeadBranchElimPass())
+        .RegisterPass(spvtools::CreateSimplificationPass())
+        .RegisterPass(spvtools::CreateIfConversionPass())
+        .RegisterPass(spvtools::CreateCopyPropagateArraysPass())
+        .RegisterPass(spvtools::CreateReduceLoadSizePass())
+        .RegisterPass(spvtools::CreateAggressiveDCEPass(preserveInterface))
+        .RegisterPass(spvtools::CreateBlockMergePass())
+        .RegisterPass(spvtools::CreateRedundancyEliminationPass())
+        .RegisterPass(spvtools::CreateDeadBranchElimPass())
+        .RegisterPass(spvtools::CreateBlockMergePass())
+        .RegisterPass(spvtools::CreateSimplificationPass());
+}
+
+// Optimise a SPIR-V module in place (the InteropArray<uint8_t> holding the words). False + message on failure.
+static bool OptimizeSpirvPreservingInterface(InteropArray<uint8_t> &module, std::string &error)
+{
+    spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_0);  // shaderc's default target environment
+    optimizer.SetMessageConsumer([&error](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+        error += message;
+        error += "\n";
+    });
+    RegisterPerformancePassesPreservingInterface(optimizer);
+
+    spvtools::OptimizerOptions optOptions;
+    optOptions.set_preserve_bindings(true);
+    optOptions.set_run_validator(false);
+
+    const uint32_t *words = reinterpret_cast<const uint32_t *>(module.Data);
+    const size_t wordCount = module.Count / sizeof(uint32_t);
+    std::vector<uint32_t> optimised;
+    if (!optimizer.Run(words, wordCount, &optimised, optOptions))
+    {
+        if (error.empty()) error = "spvtools::Optimizer::Run returned false";
+        return false;
+    }
+    module.CopyFrom(static_cast<uint32_t>(optimised.size() * sizeof(uint32_t)), reinterpret_cast<const uint8_t *>(optimised.data()));
+    return true;
 }
 
 VD_EXPORT CompilationResult *CrossCompile(CrossCompileInfo *info)
@@ -873,10 +955,13 @@ VD_EXPORT CompilationResult *CompileGlslToSpirv(GlslCompileInfo *info)
         // Performance optimization can still be applied independently of debug info.
         options.SetGenerateDebugInfo();
 
-        if (!info->Debug)
-        {
-            options.SetOptimizationLevel(shaderc_optimization_level_performance);
-        }
+        // D3 (AN_Veldrid/_BUGFIX/BUGFIX_ShaderInterfaceContract_NameVerified.md): shaderc's performance level runs spirv-opt's
+        // ADCE WITHOUT preserve_interface, which deletes any stage input/output the shader declares but never reads - and a
+        // fragment input that vanishes from ONE stage changes how fxc packs D3D11 interpolators (three production hits). So shaderc
+        // emits UNoptimised SPIR-V here and OptimizeSpirvPreservingInterface() below runs the identical performance pass list with
+        // ADCE(preserve_interface = true). Declared == compiled, by construction.
+        options.SetOptimizationLevel(shaderc_optimization_level_zero);
+        const bool optimise = !info->Debug;
 
         // CRITICAL: Preserve binding and descriptor_set decorations during optimization.
         // Veldrid's resource model requires shader binding numbers to exactly match the
@@ -901,11 +986,24 @@ VD_EXPORT CompilationResult *CompileGlslToSpirv(GlslCompileInfo *info)
             }
         }
 
-        return CompileGLSLToSPIRV(
+        CompilationResult *compiled = CompileGLSLToSPIRV(
             std::string(info->SourceText.Data, info->SourceText.Count),
             info->Kind,
             std::string(info->FileName.Data, info->FileName.Count),
             options);
+        if (!optimise || !compiled->Succeeded)
+        {
+            return compiled;
+        }
+
+        // D3: the performance passes, with the interface preserved (see the comment at SetOptimizationLevel above).
+        std::string optError;
+        if (!OptimizeSpirvPreservingInterface(compiled->DataBuffers[0], optError))
+        {
+            delete compiled;
+            return new CompilationResult("SPIR-V optimisation failed: " + optError);
+        }
+        return compiled;
     }
     catch (std::exception e)
     {

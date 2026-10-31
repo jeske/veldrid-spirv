@@ -8,18 +8,19 @@ namespace Veldrid.SPIRV.Tests
     /// <summary>
     /// The shader interface contract (AN_Veldrid/_BUGFIX/BUGFIX_ShaderInterfaceContract_NameVerified.md), compile side.
     /// Fixture: ArcaneSiege's ChunkInstanced pair as of 2026-10-31 - the third production hit of the D3D11 varying-packing class.
-    /// The vertex shader emits locations 0..6; the vertex-lit fragment declares 0,1,2 and 6 and READS only those, so the optimiser
-    /// strips the declared-but-unused 3..5 and fxc packs the two stages differently. The compiler must now REFUSE this pair.
+    /// The vertex shader emits locations 0..6; the ORIGINAL vertex-lit fragment declared only 0,1,2 and 6, so fxc packed the two
+    /// stages differently (red/green tiles). The compiler must REFUSE that pair forever (V5b). The FIXED fragment declares 3..5 without
+    /// reading them; with D3 (declared interface never eliminated) that is a complete, matching interface and compiles.
     /// </summary>
     public class ShaderInterfaceContractTests
     {
         private static string Fixture(string name) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestShaders", "InterfaceContract", name));
 
         [Fact]
-        public void ArcaneSiege_ChunkInstanced_VertexLit_ThrowsNamingTheMissingVaryings()
+        public void ArcaneSiege_ChunkInstanced_VertexLit_Original_ThrowsNamingTheMissingVaryings()
         {
             string vert = Fixture("ChunkInstanced.vert.glsl");
-            string frag = Fixture("ChunkInstanced_VertexLit.frag.glsl");
+            string frag = Fixture("ChunkInstanced_VertexLit_Original.frag.glsl");
 
             var ex = Assert.Throws<ShaderInterfaceContractException>(() =>
                 ShaderBundleCompiler.CompileVertexFragment(vert, frag, "ChunkInstanced", null, "ChunkInstanced.vert.glsl", "ChunkInstanced.frag.glsl"));
@@ -37,21 +38,53 @@ namespace Veldrid.SPIRV.Tests
         }
 
         [Fact]
-        public void ArcaneSiege_ChunkInstanced_GBuffer_DeclaredButUnreadVaryingIsEliminatedToday_Throws()
+        public void ArcaneSiege_ChunkInstanced_VertexLit_DeclaresAllUnread_Passes()
+        {
+            // The fix the contract demands: declare 3..5 even though this stage never reads them. D3 keeps the declarations through
+            // optimisation (before S2 they were stripped and this pair threw exactly like the original).
+            string vert = Fixture("ChunkInstanced.vert.glsl");
+            string frag = Fixture("ChunkInstanced_VertexLit_DeclaresAll.frag.glsl");
+            Assert.NotNull(ShaderBundleCompiler.CompileVertexFragment(vert, frag, "ChunkInstanced", null, "ChunkInstanced.vert.glsl", "ChunkInstanced.frag.glsl"));
+        }
+
+        [Fact]
+        public void ArcaneSiege_ChunkInstanced_GBuffer_DeclaredButUnreadVarying_Passes()
         {
             // FINDING 2026-10-31 (S1 gate): the GBuffer fragment DECLARES all seven varyings but never READS fragVertexLightColor
-            // ("unused in this mode"), so shaderc's optimiser strips it and the compiled fragment has 6 inputs. It renders correctly
-            // only because the dropped varying is the LAST one (location 6): fxc packs 0..5 identically in both stages. Any varying
-            // added after it would break silently. The contract therefore REJECTS it today; S2 (D3: declared interface is never
-            // eliminated) flips this test to "passes" - deliberately, not by accident.
+            // ("unused in this mode"). Before D3 the optimiser stripped it (6 inputs) and this pair rendered correctly only because the
+            // dropped varying was the LAST one (location 6) - fxc packed 0..5 identically. With D3 the declaration survives and the
+            // pair is a complete, matching interface.
             string vert = Fixture("ChunkInstanced.vert.glsl");
             string frag = Fixture("ChunkInstanced_GBuffer.frag.glsl");
+            Assert.NotNull(ShaderBundleCompiler.CompileVertexFragment(vert, frag, "ChunkInstanced_GBuffer", null, "ChunkInstanced.vert.glsl", "ChunkInstanced_GBuffer.frag.glsl"));
+        }
 
-            var ex = Assert.Throws<ShaderInterfaceContractException>(() =>
-                ShaderBundleCompiler.CompileVertexFragment(vert, frag, "ChunkInstanced_GBuffer", null, "ChunkInstanced.vert.glsl", "ChunkInstanced_GBuffer.frag.glsl"));
-            var only = Assert.Single(ex.Violations);
-            Assert.Equal("fragVertexLightColor", only.Name);
-            Assert.Contains("eliminated", only.Detail);
+        [Fact]
+        public void D3_DeclaredInterfaceSurvivesOptimisation_DebugAndOptimisedAgree()
+        {
+            // The regression guard for D3: a fragment input that is declared and never read must be present in the OPTIMISED SPIR-V
+            // exactly as in the debug (unoptimised) SPIR-V. If the SPIRV-Tools pin moves and the pass list drifts, this fails.
+            const string frag = @"#version 450
+layout(location = 0) in vec2 vUv;
+layout(location = 1) in vec3 vColor;
+layout(location = 2) flat in int vInstance;   // declared, never read
+layout(location = 0) out vec4 o;
+void main() { o = vec4(vColor * vUv.x, 1.0); }";
+            ShaderInterface_Varying[] Inputs(bool debug)
+            {
+                var vs = SpirvCompilation.CompileGlslToSpirv(PairVert, "v", ShaderStages.Vertex, new GlslCompileOptions(debug));
+                var fs = SpirvCompilation.CompileGlslToSpirv(frag, "f", ShaderStages.Fragment, new GlslCompileOptions(debug));
+#pragma warning disable CS0618
+                return SpirvCompilation.CompileVertexFragment(vs.SpirvBytes, fs.SpirvBytes, CrossCompileTarget.HLSL, new CrossCompileOptions()).Reflection.Interface.FragmentInputs;
+#pragma warning restore CS0618
+            }
+            var debugInputs = Inputs(debug: true).OrderBy(v => v.Location).ToArray();
+            var optimisedInputs = Inputs(debug: false).OrderBy(v => v.Location).ToArray();
+            Assert.Equal(3, debugInputs.Length);
+            Assert.Equal(debugInputs, optimisedInputs);
+            var inst = optimisedInputs.Single(v => v.Name == "vInstance");
+            Assert.True(inst.Flat);
+            Assert.Equal(ShaderInterface_ScalarType.Int, inst.Scalar);
         }
 
         [Fact]
@@ -67,15 +100,13 @@ namespace Veldrid.SPIRV.Tests
             var itf = result.Reflection.Interface;
 
             Assert.Equal(7, itf.VertexOutputs.Length);
-            // 6, not 7: fragVertexLightColor is declared but unread in the GBuffer stage and the optimiser removes it (see the test above).
-            Assert.Equal(6, itf.FragmentInputs.Length);
-            Assert.DoesNotContain(itf.FragmentInputs, v => v.Name == "fragVertexLightColor");
+            Assert.Equal(7, itf.FragmentInputs.Length);   // includes the declared-but-unread fragVertexLightColor (D3)
             var gridTile = itf.VertexOutputs.Single(v => v.Name == "fragGridTile");
             Assert.Equal(5u, gridTile.Location);
             Assert.True(gridTile.Flat);
             Assert.Equal(ShaderInterface_ScalarType.Float, gridTile.Scalar);
             Assert.Equal(2u, gridTile.VecSize);
-            var light = itf.VertexOutputs.Single(v => v.Name == "fragVertexLightColor");
+            var light = itf.FragmentInputs.Single(v => v.Name == "fragVertexLightColor");
             Assert.Equal(6u, light.Location);
             Assert.Equal(3u, light.VecSize);
             Assert.False(light.Flat);
