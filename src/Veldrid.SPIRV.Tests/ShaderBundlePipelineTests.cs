@@ -84,6 +84,27 @@ namespace Veldrid.SPIRV.Tests
         }
 
         [Fact]
+        public void InterfaceSnapshot_WrittenBesideBundle_AndToolchainDriftWithoutSourceChange_Throws_V8()
+        {
+            ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair);
+            string snapshot = ShaderBundlePipeline.InterfaceSnapshotPath(CacheDir, Pair.BundleName);
+            Assert.True(File.Exists(snapshot));
+            Assert.Contains("\"vUv\"", File.ReadAllText(snapshot));
+
+            // Simulate "the compiler changed what it produced for the same source": edit the recorded interface, keep the source hash,
+            // then force a recompile (forget the hash manifest, as a compiler upgrade would by changing the compiler tag).
+            File.WriteAllText(snapshot, File.ReadAllText(snapshot).Replace("\"location\": 0", "\"location\": 7"));
+            File.Delete(Path.Combine(CacheDir, ShaderBundlePipeline.HashManifestFileName));
+            var ex = Assert.Throws<ShaderInterfaceContractException>(() => ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair));
+            Assert.Equal(ShaderBundlePipeline.Rule_V8_InterfaceSnapshot, ex.Violations[0].Rule);
+
+            // A SOURCE change legitimately rewrites the snapshot.
+            File.WriteAllText(Path.Combine(SourceDir, Pair.FragmentFile), Frag.Replace("vec4(vUv, 0, 1)", "vec4(vUv, 1, 1)"));
+            ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair);
+            Assert.Contains("\"location\": 0", File.ReadAllText(snapshot));
+        }
+
+        [Fact]
         public void GetOrBuild_ContractViolation_Throws_AndLeavesNoBundle()
         {
             File.WriteAllText(Path.Combine(SourceDir, Pair.FragmentFile), "#version 450\nlayout(location = 1) in vec2 vUv;\nlayout(location = 0) out vec4 o;\nvoid main() { o = vec4(vUv, 0, 1); }\n");

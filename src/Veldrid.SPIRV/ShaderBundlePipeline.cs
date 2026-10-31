@@ -127,11 +127,69 @@ namespace Veldrid.SPIRV
 
             log?.Invoke($"  compiling:  {pair.BundleName} ({pair.VertexFile} + {pair.FragmentFile})");
             VeldridShaderBundle bundle = BuildBundle(vertexGlsl, fragmentGlsl, pair.BundleName, pair.VertexFile, pair.FragmentFile, options);
+            CheckAndWriteInterfaceSnapshot(cacheDir, pair, vertexGlsl, fragmentGlsl, bundle, log);
             bundle.SerializeToFile(bundlePath);
             manifest[pair.BundleName] = hash;
             log?.Invoke($"    -> {pair.BundleName}.vdshader ({new FileInfo(bundlePath).Length} bytes; layouts={bundle.ResourceLayoutDescriptions?.Length ?? 0}; backends={string.Join(", ", bundle.Backends.Keys)})");
             didCompile = true;
             return bundlePath;
+        }
+
+        /// <summary>Rule id for a snapshot mismatch: the compiled interface changed while the sources did not - only the toolchain can do that.</summary>
+        public const string Rule_V8_InterfaceSnapshot = "V8";
+
+        /// <summary>Path of the interface snapshot written beside a bundle (commit it with the bundle).</summary>
+        public static string InterfaceSnapshotPath(string cacheDir, string bundleName) => Path.Combine(cacheDir, bundleName + ".interface.json");
+
+        /// <summary>Hash of the SOURCES only (no compiler version) - the key that tells "the source changed" from "the compiler changed".</summary>
+        public static string ComputeSourceOnlyHash(ShaderBundle_SourcePair pair, string vertexGlsl, string fragmentGlsl)
+        {
+            var sb = new StringBuilder();
+            sb.Append(pair.BundleName).Append('|').Append(pair.VertexFile).Append('|').Append(pair.FragmentFile).Append('\n');
+            sb.Append(NormaliseLineEndings(vertexGlsl)).Append('\n').Append(NormaliseLineEndings(fragmentGlsl));
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()))).ToLowerInvariant();
+        }
+
+        private sealed class InterfaceSnapshot
+        {
+            public string SourceHash { get; set; }
+            public string CompilerVersionTag { get; set; }
+            public VdShaderInterface Interface { get; set; }
+            public VdShaderResourceLayout[] ResourceLayoutDescriptions { get; set; }
+        }
+
+        private static readonly System.Text.Json.JsonSerializerOptions SnapshotJson = new() { WriteIndented = true };
+
+        // D0 / S2c: a committed record of the compiled interface. If the sources are byte-identical to the snapshot's but the compiled
+        // interface differs, a toolchain change (compiler upgrade, pass-list drift, cross-compiler behaviour) moved something that
+        // declared-vs-compiled (V4/V5a/V6) does not model - e.g. resource layout slots, vertex formats. That is a hard fail, with a diff.
+        private static void CheckAndWriteInterfaceSnapshot(string cacheDir, ShaderBundle_SourcePair pair, string vertexGlsl, string fragmentGlsl, VeldridShaderBundle bundle, Action<string> log)
+        {
+            string path = InterfaceSnapshotPath(cacheDir, pair.BundleName);
+            string sourceHash = ComputeSourceOnlyHash(pair, vertexGlsl, fragmentGlsl);
+            string interfaceJson = System.Text.Json.JsonSerializer.Serialize(bundle.Interface, SnapshotJson);
+            string layoutsJson = System.Text.Json.JsonSerializer.Serialize(bundle.ResourceLayoutDescriptions, SnapshotJson);
+            if (File.Exists(path))
+            {
+                InterfaceSnapshot previous = null;
+                try { previous = System.Text.Json.JsonSerializer.Deserialize<InterfaceSnapshot>(File.ReadAllText(path), SnapshotJson); } catch { /* unreadable snapshot: rewrite */ }
+                if (previous?.SourceHash == sourceHash)
+                {
+                    string prevInterface = System.Text.Json.JsonSerializer.Serialize(previous.Interface, SnapshotJson);
+                    string prevLayouts = System.Text.Json.JsonSerializer.Serialize(previous.ResourceLayoutDescriptions, SnapshotJson);
+                    if (prevInterface != interfaceJson || prevLayouts != layoutsJson)
+                    {
+                        throw new ShaderInterfaceContractException(pair.BundleName, new[]
+                        {
+                            new ShaderContractViolation(Rule_V8_InterfaceSnapshot, pair.BundleName,
+                                $"snapshot (compiler {previous.CompilerVersionTag})", $"now (compiler {CompilerVersionTag})",
+                                $"the GLSL did not change but the compiled interface did - a toolchain change moved something. Diff {Path.GetFileName(path)} against the new output; if the change is intended, delete the snapshot and recompile."),
+                        });
+                    }
+                }
+            }
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new InterfaceSnapshot { SourceHash = sourceHash, CompilerVersionTag = CompilerVersionTag, Interface = bundle.Interface, ResourceLayoutDescriptions = bundle.ResourceLayoutDescriptions }, SnapshotJson));
+            log?.Invoke($"    -> {Path.GetFileName(path)}");
         }
 
         /// <summary>Per-user runtime cache location for an application: <c>%LOCALAPPDATA%/ArtificialNecessity/ShaderCache/&lt;appName&gt;</c>.</summary>
