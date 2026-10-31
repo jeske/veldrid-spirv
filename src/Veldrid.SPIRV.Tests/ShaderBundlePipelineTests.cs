@@ -90,5 +90,20 @@ namespace Veldrid.SPIRV.Tests
             Assert.Throws<ShaderInterfaceContractException>(() => ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair));
             Assert.False(File.Exists(ShaderBundlePipeline.BundlePath(CacheDir, Pair.BundleName)));
         }
+
+        [Fact]
+        public void GetOrBuild_ResolvesOneLevelIncludes_AndRebuildsWhenTheIncludedFileChanges()
+        {
+            File.WriteAllText(Path.Combine(SourceDir, "common.glsl"), "vec4 tint(vec2 uv) { return vec4(uv, 0, 1); }\n");
+            File.WriteAllText(Path.Combine(SourceDir, Pair.FragmentFile), "#version 450\nlayout(location = 0) in vec2 vUv;\nlayout(location = 0) out vec4 o;\n//#include \"common.glsl\"\nvoid main() { o = tint(vUv); }\n");
+            var log = new System.Collections.Generic.List<string>();
+            ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair, log.Add);
+            Assert.Contains(log, l => l.Contains("compiling"));
+
+            File.WriteAllText(Path.Combine(SourceDir, "common.glsl"), "vec4 tint(vec2 uv) { return vec4(uv, 1, 1); }\n");
+            log.Clear();
+            ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair, log.Add);
+            Assert.Contains(log, l => l.Contains("compiling"));   // the include changed -> the bundle is stale
+        }
     }
 }

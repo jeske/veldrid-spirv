@@ -105,8 +105,8 @@ namespace Veldrid.SPIRV
             string fragmentPath = Path.Combine(sourceDir, pair.FragmentFile);
             if (!File.Exists(vertexPath)) throw new FileNotFoundException($"Vertex shader source for bundle '{pair.BundleName}' not found", vertexPath);
             if (!File.Exists(fragmentPath)) throw new FileNotFoundException($"Fragment shader source for bundle '{pair.BundleName}' not found", fragmentPath);
-            string vertexGlsl = File.ReadAllText(vertexPath, Encoding.UTF8);
-            string fragmentGlsl = File.ReadAllText(fragmentPath, Encoding.UTF8);
+            string vertexGlsl = ResolveIncludes(File.ReadAllText(vertexPath, Encoding.UTF8), sourceDir);
+            string fragmentGlsl = ResolveIncludes(File.ReadAllText(fragmentPath, Encoding.UTF8), sourceDir);
             ShaderBundle_InputHash hash = ComputeInputHash(pair, vertexGlsl, fragmentGlsl);
             string bundlePath = BundlePath(cacheDir, pair.BundleName);
 
@@ -129,6 +129,26 @@ namespace Veldrid.SPIRV
         /// <summary>Per-user runtime cache location for an application: <c>%LOCALAPPDATA%/ArtificialNecessity/ShaderCache/&lt;appName&gt;</c>.</summary>
         public static string DefaultRuntimeCacheDir(string appName)
             => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ArtificialNecessity", "ShaderCache", appName);
+
+        /// <summary>
+        /// The one source-level preprocessor the pipeline supports (SilkyNvg's convention): a line <c>//#include "file"</c> is replaced by the
+        /// contents of <c>sourceDir/file</c>. One level only (no nesting), so a shared block of GLSL can live in one file. Hashing is over
+        /// the RESOLVED text, so a change in an included file rebuilds every bundle that includes it.
+        /// </summary>
+        public static string ResolveIncludes(string glslSource, string sourceDir)
+        {
+            if (glslSource.IndexOf("//#include", StringComparison.Ordinal) < 0) return glslSource;
+            return System.Text.RegularExpressions.Regex.Replace(
+                glslSource,
+                "^//#include\\s+\"(?<file>[^\"]+)\"\\s*$",
+                match =>
+                {
+                    string includePath = Path.Combine(sourceDir, match.Groups["file"].Value);
+                    if (!File.Exists(includePath)) throw new FileNotFoundException($"//#include not found: {includePath}", includePath);
+                    return File.ReadAllText(includePath, Encoding.UTF8);
+                },
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+        }
 
         private static string NormaliseLineEndings(string text) => text.Replace("\r\n", "\n");
 
