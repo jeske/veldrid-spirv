@@ -119,6 +119,12 @@ namespace Veldrid.SPIRV
             if (capturedReflection != null)
                 ShaderInterfaceVerifier.ThrowIfViolated(shaderName, capturedReflection.Interface);
 
+            // D0 / D3 guard (V4, V5a, V6): what the SOURCE declares must be what the toolchain PRODUCED, by name. This is the detector for
+            // "the compiler moved / dropped / re-laid-out an element" - a toolchain defect is a hard fail here, never a visual.
+            var declaredViolations = ShaderInterfaceVerifier.VerifyDeclaredAgainstCompiled(vertexGlsl, fragmentGlsl, capturedReflection);
+            if (declaredViolations.Count > 0)
+                throw new ShaderInterfaceContractException(shaderName, declaredViolations);
+
             // D5: the bundle carries its interface so pipeline creation can verify the application against it BY NAME (V7, in Veldrid).
             if (capturedReflection != null)
                 bundle.Interface = ToBundleInterface(capturedReflection);
