@@ -126,7 +126,10 @@ static void ReflectUniformBlocks(const Compiler &compiler, const SmallVector<Res
         block->BlockName.CopyFrom(static_cast<uint32_t>(blockName.size()), blockName.c_str());
         block->Set = compiler.get_decoration(ub.id, spv::DecorationDescriptorSet);
         block->Binding = compiler.get_decoration(ub.id, spv::DecorationBinding);
-        block->SizeBytes = static_cast<uint32_t>(compiler.get_declared_struct_size(blockType));
+        // std140 BLOCK size: the declared size rounded up to the block's 16-byte base alignment. get_declared_struct_size() stops at the
+        // end of the last member (mat4 + float = 68), but a uniform buffer and the C# struct bound to it are 80 - that is what V2/V7c compare.
+        uint32_t declaredSize = static_cast<uint32_t>(compiler.get_declared_struct_size(blockType));
+        block->SizeBytes = (declaredSize + 15u) & ~15u;
         block->Stages = stage;
         block->Members.Resize(static_cast<uint32_t>(blockType.member_types.size()));
         for (uint32_t m = 0; m < blockType.member_types.size(); m++)
