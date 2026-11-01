@@ -18,7 +18,7 @@ namespace Veldrid.SPIRV.Tests
         public void ReflectionFromSpirv_Succeeds(
             string vertex, string fragment,
             VertexElementDescription[] verts,
-            ResourceLayoutDescription[] layouts)
+            ResourceLayoutElementDescription[][] layouts)
         {
             byte[] vsBytes = TestUtil.LoadBytes(vertex);
             byte[] fsBytes = TestUtil.LoadBytes(fragment);
@@ -39,12 +39,12 @@ namespace Veldrid.SPIRV.Tests
             Assert.Equal(layouts.Length, reflectedLayouts.Length);
             for (int i = 0; i < layouts.Length; i++)
             {
-                ResourceLayoutDescription layout = layouts[i];
+                ResourceLayoutElementDescription[] layout = layouts[i];
                 ResourceLayoutDescription reflectedLayout = reflectedLayouts[i];
-                Assert.Equal(layout.Elements.Length, reflectedLayout.Elements.Length);
-                for (int j = 0; j < layout.Elements.Length; j++)
+                Assert.Equal(layout.Length, reflectedLayout.Elements.Length);
+                for (int j = 0; j < layout.Length; j++)
                 {
-                    AssertEqual(layout.Elements[j], reflectedLayout.Elements[j]);
+                    AssertEqual(layout[j], reflectedLayout.Elements[j]);
                 }
             }
         }
@@ -61,15 +61,17 @@ namespace Veldrid.SPIRV.Tests
                     new VertexElementDescription("Normal", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
                     new VertexElementDescription("TexCoord", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float2),
                 },
-                new ResourceLayoutDescription[]
+                // Expected elements per set. (Veldrid's positional ResourceLayoutDescription constructor is internal since the typed
+                // slot API; the reflection result is still compared element by element.)
+                new ResourceLayoutElementDescription[][]
                 {
-                    new ResourceLayoutDescription(
+                    new[] {
                         new ResourceLayoutElementDescription("vdspv_0_0", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
                         UnusedResource,
-                        new ResourceLayoutElementDescription("vdspv_0_2", ResourceKind.UniformBuffer, ShaderStages.Fragment)),
-                    new ResourceLayoutDescription(
+                        new ResourceLayoutElementDescription("vdspv_0_2", ResourceKind.UniformBuffer, ShaderStages.Fragment) },
+                    new[] {
                         new ResourceLayoutElementDescription("vdspv_1_0", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                        new ResourceLayoutElementDescription("vdspv_1_1", ResourceKind.Sampler, ShaderStages.Fragment))
+                        new ResourceLayoutElementDescription("vdspv_1_1", ResourceKind.Sampler, ShaderStages.Fragment) }
                 }
             };
         }
