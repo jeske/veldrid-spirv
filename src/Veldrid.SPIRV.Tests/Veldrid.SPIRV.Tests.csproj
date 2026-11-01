@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <!-- Veldrid 5.261101+ public API uses params ReadOnlySpan (C# 13); same requirement every Veldrid caller has. -->
+    <LangVersion>13</LangVersion>
     <OutputType>exe</OutputType>
     <IsPackable>false</IsPackable>
     <StartupObject>Program</StartupObject>

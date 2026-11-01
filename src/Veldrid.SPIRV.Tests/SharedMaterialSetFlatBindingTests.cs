@@ -109,7 +109,7 @@ void main() { o = texture(sampler2D(EmissiveTexture, MaterialSampler), frag_TexC
             Assert.Equal(new uint[] { 3, 4 }, Set1(undeclared).Select(e => e.Binding).ToArray());
         }
 
-        // ───────────────────────── (b) detection by Veldrid V7d ─────────────────────────
+        // ───────────────────────── (b) Veldrid V7d: identical DECLARATIONS decide; registers are the pipeline's business ─────────────────────────
 
         [Fact]
         public void V7d_AcceptsTheSharedSet_WhenBothBundlesDeclareTheWholeSet()
@@ -117,28 +117,23 @@ void main() { o = texture(sampler2D(EmissiveTexture, MaterialSampler), frag_TexC
             var full = Compile(FragFull, "MatFull");
             var partialReader = Compile(FragDeclaresAll_ReadsEmissiveOnly, "MatDeclaresAllReadsEmissive");
             var violations = new List<Veldrid.ShaderContractViolation>();
-            ShaderContractVerifier.VerifySharedSetBinding(1,
-                partialReader.GetResourceLayouts()[1], partialReader.FlatBindingMap,   // the pipeline (reads Emissive only)
-                full.GetResourceLayouts()[1], full.FlatBindingMap,                     // the set (built from the full bundle)
-                violations);
+            ShaderContractVerifier.VerifySharedSetBinding(1, partialReader.GetResourceLayouts()[1], full.GetResourceLayouts()[1], violations);
             Assert.Empty(violations);
         }
 
         [Fact]
-        public void V7d_RefusesTheSharedSet_WhenThePipelineBundleDeclaredOnlyWhatItReads_NamingTheDriftedBinding()
+        public void V7d_RefusesTheSharedSet_WhenThePipelineBundleDeclaredOnlyWhatItReads()
         {
             var full = Compile(FragFull, "MatFull");
             var undeclared = Compile(FragUndeclared_ReadsEmissiveOnly, "MatUndeclaredReadsEmissive");
             var violations = new List<Veldrid.ShaderContractViolation>();
-            ShaderContractVerifier.VerifySharedSetBinding(1,
-                undeclared.GetResourceLayouts()[1], undeclared.FlatBindingMap,
-                full.GetResourceLayouts()[1], full.FlatBindingMap,
-                violations);
+            ShaderContractVerifier.VerifySharedSetBinding(1, undeclared.GetResourceLayouts()[1], full.GetResourceLayouts()[1], violations);
             Assert.NotEmpty(violations);
             Assert.All(violations, v => Assert.Equal(ShaderContractVerifier.Rule_V7d_SharedSetBinding, v.Rule));
-            // Either the layouts differ in length (undeclared bindings 0-2 / 5 are absent) or, if the compiler padded the layout, the
-            // Emissive flat index differs (t0 vs t3). Both are the same fact, reported by name.
-            Assert.Contains(violations, v => v.Name.StartsWith("set 1") || v.Name == "EmissiveTexture");
+            // The under-declared shader's set 1 is not the material set (bindings 0-2 / 5 absent) - a DECLARATION mismatch, by set/binding.
+            // Where its Emissive register ended up (t0) is irrelevant to the rule: the pipeline-side bind translates registers per shader
+            // (SharedSetCrossPipelineBindingGpuTests).
+            Assert.Contains(violations, v => v.Name.StartsWith("set 1"));
         }
     }
 }
