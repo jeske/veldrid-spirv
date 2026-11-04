@@ -14,6 +14,10 @@ namespace Veldrid.SPIRV
         public InteropArray UniformBlocks; // InteropArray<NativeUniformBlockDescription>
         // ABI 3 (V10): storage blocks, one entry per stage occurrence.
         public InteropArray StorageBlocks; // InteropArray<NativeStorageBlockDescription>
+        // ABI 4 (V11, AN_Monsters spec 204 T1): HLSL register (b#) of SPIRV-Cross's host-filled `SPIRV_Cross_VertexInfo` cbuffer
+        // (base vertex + base instance for the vertex stage), or uint.MaxValue when the shader reads neither gl_VertexIndex nor
+        // gl_InstanceIndex. See SpirvReflection.HlslVertexInfoRegister.
+        public uint HlslVertexInfoRegister;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

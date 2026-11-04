@@ -447,6 +447,12 @@ Compiler *GetCompiler(std::vector<uint32_t> spirvBytes, const CrossCompileInfo &
         CompilerHLSL::Options opts = {};
         opts.shader_model = 50;
         opts.point_size_compat = true;
+        // V11 (AN_Monsters spec 204 T1): make gl_VertexIndex / gl_InstanceIndex mean what SPIR-V says they mean. D3D11's SV_VertexID /
+        // SV_InstanceID exclude the draw's base vertex / base instance; with this option SPIRV-Cross adds a host-filled cbuffer
+        // `SPIRV_Cross_VertexInfo` to them. Its register is assigned in CompileVertexFragment (next free b#) and reported through
+        // ReflectionInfo.HlslVertexInfoRegister; Veldrid's D3D11 backend fills it. Without this, every D3D11 draw with a non-zero
+        // instanceStart / vertexOffset silently indexed from 0 (AN_Monsters 202 F13).
+        opts.support_nonzero_base_vertex_base_instance = true;
         ret->set_hlsl_options(opts);
         CompilerGLSL::Options commonOpts;
         commonOpts.vertex.flip_vert_y = info.InvertY;
@@ -612,6 +618,7 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     AddResources(fsResources.separate_samplers, fsCompiler, allResources, 1, info.NormalizeResourceNames);
 
     std::vector<BindingMapEntry> bindingMapEntries;
+    uint32_t hlslVertexInfoRegisterCandidate = UINT32_MAX;
 
     if (info.Target == HLSL || info.Target == MSL)
     {
@@ -657,6 +664,17 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
             entry.Stages = stages;
             entry.FlatIndex = index;
             bindingMapEntries.push_back(entry);
+        }
+
+        // V11 (spec 204 T1): if the vertex stage reads gl_VertexIndex / gl_InstanceIndex, SPIRV-Cross emits `cbuffer SPIRV_Cross_VertexInfo`
+        // (support_nonzero_base_vertex_base_instance, set in GetCompiler). Pin it to the NEXT FREE b# after every uniform buffer assigned
+        // above (bufferIndex is the shared VS+FS cbuffer counter) so it can never collide with an application block; fxc validates the
+        // register (b0..b13). Whether it was actually emitted is known only after compile() - see below.
+        if (info.Target == HLSL)
+        {
+            hlslVertexInfoRegisterCandidate = bufferIndex;
+            static_cast<CompilerHLSL *>(vsCompiler)->set_hlsl_aux_buffer_binding(
+                HLSL_AUX_BINDING_BASE_VERTEX_INSTANCE, hlslVertexInfoRegisterCandidate, 0);
         }
     }
 
@@ -782,6 +800,12 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     result->Reflection.FragmentInputs = std::move(fragmentInputs);
     result->Reflection.UniformBlocks = CollectUniformBlocks(uniformBlocks);
     result->Reflection.StorageBlocks = CollectStorageBlocks(storageBlocks);
+    // V11: report the VertexInfo cbuffer register ONLY if SPIRV-Cross actually emitted it (the vertex stage reads an index builtin).
+    result->Reflection.HlslVertexInfoRegister =
+        (info.Target == HLSL &&
+         static_cast<CompilerHLSL *>(vsCompiler)->is_hlsl_aux_buffer_binding_used(HLSL_AUX_BINDING_BASE_VERTEX_INSTANCE))
+            ? hlslVertexInfoRegisterCandidate
+            : UINT32_MAX;
 
     if (!bindingMapEntries.empty())
     {
@@ -897,6 +921,8 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
     // carried no interface and the managed verifier (correctly) reported every declared block as ABSENT.
     result->Reflection.UniformBlocks = CollectUniformBlocks(uniformBlocks);
     result->Reflection.StorageBlocks = CollectStorageBlocks(storageBlocks);
+    // A compute stage has no vertex builtins, so no VertexInfo cbuffer (V11).
+    result->Reflection.HlslVertexInfoRegister = UINT32_MAX;
 
     if (!bindingMapEntries.empty())
     {

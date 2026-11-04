@@ -330,6 +330,13 @@ struct ReflectionInfo
     InteropArray<UniformBlockDescription> UniformBlocks;
     // ABI 3: storage blocks (vertex / fragment / compute), one entry per stage occurrence.
     InteropArray<StorageBlockDescription> StorageBlocks;
+    // ABI 4 (V11, AN_Monsters spec 204 T1): the HLSL cbuffer register (b#) of SPIRV-Cross's `SPIRV_Cross_VertexInfo`
+    // { int SPIRV_Cross_BaseVertex; int SPIRV_Cross_BaseInstance; } - emitted for the VERTEX stage of the HLSL target when the
+    // shader reads gl_VertexIndex / gl_InstanceIndex, because D3D11's SV_VertexID / SV_InstanceID EXCLUDE the draw's base vertex /
+    // base instance while SPIR-V's VertexIndex / InstanceIndex INCLUDE them. The host (Veldrid D3D11) must fill this cbuffer before
+    // every draw whose bases are non-zero. The register is the next free b# after the shader's own uniform buffers, chosen HERE
+    // (the one assigner, V9) and recorded for the host. UINT32_MAX = not emitted (shader reads neither builtin, or not the HLSL target).
+    uint32_t HlslVertexInfoRegister;
 };
 
 struct CompilationResult

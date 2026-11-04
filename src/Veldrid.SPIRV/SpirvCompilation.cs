@@ -193,7 +193,8 @@ namespace Veldrid.SPIRV
                         vertexElements,
                         layouts,
                         bindingMap,
-                        ReadInterface(reflInfo));
+                        ReadInterface(reflInfo),
+                        ReadHlslVertexInfoRegister(reflInfo));
 
                     return new VertexFragmentCompilationResult(vsCode, fsCode, reflection);
                 }
@@ -313,7 +314,8 @@ namespace Veldrid.SPIRV
                         Array.Empty<VertexElementDescription>(),
                         layouts,
                         bindingMap,
-                        ReadInterface(reflInfo));
+                        ReadInterface(reflInfo),
+                        ReadHlslVertexInfoRegister(reflInfo));
 
                     return new ComputeCompilationResult(csCode, reflection);
                 }
@@ -328,6 +330,10 @@ namespace Veldrid.SPIRV
         }
 
         /// <summary>Marshal the ABI-2 interface arrays (varyings, uniform blocks) out of the native reflection block.</summary>
+        /// <summary>ABI 4 (V11): the VertexInfo cbuffer register, or null when the native side reports uint.MaxValue (not emitted).</summary>
+        private static unsafe uint? ReadHlslVertexInfoRegister(ReflectionInfo* reflInfo)
+            => reflInfo->HlslVertexInfoRegister == uint.MaxValue ? null : reflInfo->HlslVertexInfoRegister;
+
         private static unsafe ShaderBundleInterface ReadInterface(ReflectionInfo* reflInfo)
         {
             ShaderInterface_Varying[] vertexOutputs = ReadVaryings(ref reflInfo->VertexOutputs);
