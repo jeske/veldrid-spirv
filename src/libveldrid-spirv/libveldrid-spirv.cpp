@@ -892,6 +892,11 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
     result->DataBuffers[0].CopyFrom(static_cast<uint32_t>(csText.length()), (uint8_t *)csText.c_str());
 
     result->Reflection.ResourceLayouts = CreateResourceLayoutArray(allResources, true);
+    // The compute interface = uniform + storage blocks (no varyings, no vertex inputs). These were reflected above but, until
+    // spec AN_Monsters/204 C2, never copied into the result - every compute reflection had EMPTY block arrays, so a compute bundle
+    // carried no interface and the managed verifier (correctly) reported every declared block as ABSENT.
+    result->Reflection.UniformBlocks = CollectUniformBlocks(uniformBlocks);
+    result->Reflection.StorageBlocks = CollectStorageBlocks(storageBlocks);
 
     if (!bindingMapEntries.empty())
     {

@@ -115,15 +115,15 @@ namespace Veldrid.SPIRV
 
             // THE CONTRACT (BUGFIX_ShaderInterfaceContract_NameVerified D2/D4): the two compiled stages must describe the same interface
             // by NAME. This runs on every compile - precompile tool and runtime are this same call - and a violation is an exception,
-            // never a warning. (Reflection is target-independent; the first target's is used.)
+            // never a warning. (Reflection is target-independent; the first target's is used.) Both checks are the verifier's two-pass
+            // form: a zero-allocation boolean pass, and a diagnostic rerun ONLY when it failed (spec AN_Monsters/204 C2 / repo rule).
             if (capturedReflection != null)
                 ShaderInterfaceVerifier.ThrowIfViolated(shaderName, capturedReflection.Interface);
 
             // D0 / D3 guard (V4, V5a, V6): what the SOURCE declares must be what the toolchain PRODUCED, by name. This is the detector for
             // "the compiler moved / dropped / re-laid-out an element" - a toolchain defect is a hard fail here, never a visual.
-            var declaredViolations = ShaderInterfaceVerifier.VerifyDeclaredAgainstCompiled(vertexGlsl, fragmentGlsl, capturedReflection);
-            if (declaredViolations.Count > 0)
-                throw new ShaderInterfaceContractException(shaderName, declaredViolations);
+            if (capturedReflection != null)
+                ShaderInterfaceVerifier.ThrowIfDeclaredDiffersFromCompiled(shaderName, vertexGlsl, fragmentGlsl, capturedReflection);
 
             // D5: the bundle carries its interface so pipeline creation can verify the application against it BY NAME (V7, in Veldrid).
             if (capturedReflection != null)
@@ -236,10 +236,25 @@ namespace Veldrid.SPIRV
                 capturedReflection ??= result.Reflection;
             }
 
+            // THE CONTRACT for a compute bundle (spec AN_Monsters/_SPECS_Other3DApps/204 C2): same two checks as CompileVertexFragment,
+            // same two-pass zero-allocation shape. Stage agreement is trivially true for one stage but stays on the shared code path;
+            // declared-vs-compiled covers the uniform and storage blocks (there are no varyings or vertex inputs in a compute stage).
+            // A violation is an exception, never a warning.
+            if (capturedReflection != null)
+            {
+                ShaderInterfaceVerifier.ThrowIfViolated(shaderName, capturedReflection.Interface);
+                ShaderInterfaceVerifier.ThrowIfDeclaredDiffersFromCompiled(shaderName, computeGlsl, capturedReflection);
+            }
+
+            // D5 for compute: the bundle carries its interface (uniform + storage blocks; empty vertex inputs / varyings) so pipeline
+            // creation can verify StorageBufferSlot<TElement> / UniformBlock<T> against it by NAME (Veldrid V7 / V7e). Without this a
+            // compute bundle was unusable from a ShaderPipelineShape (the shape layer refuses storage bindings it cannot verify).
+            if (capturedReflection != null)
+                bundle.Interface = ToBundleInterface(capturedReflection);
+
             // Populate ResourceLayoutDescriptions
             if (capturedReflection != null)
             {
-                // (D5 for compute - interface = blocks + resources only - is assigned after this block.)
                 bundle.ResourceLayoutDescriptions = new VdShaderResourceLayout[capturedReflection.ResourceLayouts.Length];
                 for (int i = 0; i < capturedReflection.ResourceLayouts.Length; i++)
                 {

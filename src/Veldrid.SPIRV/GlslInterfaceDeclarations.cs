@@ -122,28 +122,57 @@ namespace Veldrid.SPIRV
         /// <summary>
         /// std140 layout of a declared block computed INDEPENDENTLY of the compiler - the oracle V6 compares the compiled member offsets
         /// against. Supports scalars, vectors, matrices (column-major, as GLSL default) and arrays of those. Returns null for a member type it
-        /// does not know (nested structs, double types): that member is then checked by name/order only.
+        /// does not know (nested structs, double types): that member is then checked by name/order only. Allocates one array; the verifier's
+        /// zero-allocation first pass uses <see cref="Std140LayoutCursor"/> instead.
         /// </summary>
         public static (uint Offset, uint Size)?[] Std140Layout(GlslDeclared_Member[] members, out uint blockSizeBytes)
         {
             var result = new (uint, uint)?[members.Length];
-            uint cursor = 0;
+            var cursor = new Std140LayoutCursor();
             for (int i = 0; i < members.Length; i++)
+                result[i] = cursor.TryPlace(members[i], out uint offset, out uint size) ? (offset, size) : null;
+            blockSizeBytes = cursor.BlockSizeBytes;
+            return result;
+        }
+
+        /// <summary>
+        /// The std140 oracle as an incremental, allocation-free cursor: call <see cref="TryPlace"/> once per member in declaration order.
+        /// <see cref="AllMembersKnown"/> is false once any member type was unknown to the oracle (then <see cref="BlockSizeBytes"/> is not
+        /// authoritative). Exists so <see cref="ShaderInterfaceVerifier"/>'s first pass allocates nothing when the contract holds.
+        /// </summary>
+        public struct Std140LayoutCursor
+        {
+            private uint cursor;
+            private bool anyUnknown;
+
+            /// <summary>Place the next declared member. False = type unknown to the oracle (member is skipped, nothing advances).</summary>
+            public bool TryPlace(in GlslDeclared_Member member, out uint offsetBytes, out uint sizeBytes)
             {
-                if (!TryStd140(members[i].GlslType, out uint baseAlign, out uint size)) { result[i] = null; continue; }
+                if (!TryStd140(member.GlslType, out uint baseAlign, out uint size))
+                {
+                    anyUnknown = true;
+                    offsetBytes = sizeBytes = 0;
+                    return false;
+                }
                 uint align = baseAlign, elemSize = size;
-                if (members[i].ArrayLength > 0)
+                if (member.ArrayLength > 0)
                 {
                     // Array element base alignment/stride round up to vec4 (16) under std140.
                     align = Math.Max(16u, RoundUp(baseAlign, 16u));
-                    elemSize = RoundUp(size, 16u) * members[i].ArrayLength;
+                    elemSize = RoundUp(size, 16u) * member.ArrayLength;
                 }
                 cursor = RoundUp(cursor, align);
-                result[i] = (cursor, elemSize);
+                offsetBytes = cursor;
+                sizeBytes = elemSize;
                 cursor += elemSize;
+                return true;
             }
-            blockSizeBytes = RoundUp(cursor, 16u);
-            return result;
+
+            /// <summary>std140 block size so far (rounded up to 16). Authoritative only when <see cref="AllMembersKnown"/>.</summary>
+            public uint BlockSizeBytes => RoundUp(cursor, 16u);
+
+            /// <summary>True while every placed member had a type the oracle knows.</summary>
+            public bool AllMembersKnown => !anyUnknown;
         }
 
         private static uint RoundUp(uint value, uint multiple) => (value + multiple - 1) / multiple * multiple;
