@@ -131,5 +131,57 @@ namespace Veldrid.SPIRV.Tests
             ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Pair, log.Add);
             Assert.Contains(log, l => l.Contains("compiling"));   // the include changed -> the bundle is stale
         }
+
+        // ── Spec AN_Monsters/204 C1: compute sources go through the SAME pipeline ──────────────────────────────────────────────
+        private const string Comp = "#version 450\nlayout(local_size_x = 64) in;\nlayout(set = 0, binding = 0) uniform FillParams { uint Count; uint Multiplier; uint Addend; uint _pad0; };\nlayout(set = 0, binding = 1, std430) buffer FillValues { uint Values[]; };\nvoid main() { uint i = gl_GlobalInvocationID.x; if (i < Count) Values[i] = i * Multiplier + Addend; }\n";
+        private static readonly ShaderBundle_ComputeSource Fill = new("Fill", "fill.comp.glsl");
+
+        [Fact]
+        public void Compute_GetOrBuildAll_MixedWithAPair_CompilesVerifiesCachesAndSnapshots()
+        {
+            File.WriteAllText(Path.Combine(SourceDir, Fill.ComputeFile), Comp);
+            var log = new System.Collections.Generic.List<string>();
+            var sources = new ShaderBundle_Source[] { Pair, Fill };
+            Assert.Equal(2, ShaderBundlePipeline.GetOrBuildAll(SourceDir, CacheDir, sources, deleteOrphans: true, log.Add));
+            Assert.Contains(log, l => l.Contains("Fill") && l.Contains("[compute]"));
+
+            var bundle = VeldridShaderBundle.DeserializeFromFile(ShaderBundlePipeline.BundlePath(CacheDir, Fill.BundleName));
+            Assert.Equal("fill.comp.glsl", bundle.ComputeSource);
+            Assert.NotNull(bundle.Interface);
+            var values = Assert.Single(bundle.Interface.StorageBlocks);
+            Assert.Equal("FillValues", values.Name); Assert.True(values.HasRuntimeArray); Assert.Equal(4u, values.RuntimeArrayStrideBytes);
+            var p = Assert.Single(bundle.Interface.UniformBlocks);
+            Assert.Equal("FillParams", p.Name); Assert.Equal(16u, p.SizeBytes);
+            Assert.True(File.Exists(ShaderBundlePipeline.InterfaceSnapshotPath(CacheDir, Fill.BundleName)));
+
+            string[] manifest = File.ReadAllLines(Path.Combine(CacheDir, ShaderBundlePipeline.HashManifestFileName));
+            Assert.Equal(2, manifest.Length);
+            Assert.StartsWith("Quad ", manifest[0]); Assert.StartsWith("Fill ", manifest[1]);
+            Assert.Equal(0, ShaderBundlePipeline.GetOrBuildAll(SourceDir, CacheDir, sources, deleteOrphans: true));
+        }
+
+        [Fact]
+        public void Compute_SameSource_ProducesByteIdenticalBundles_BuildTimeEqualsRuntime()
+        {
+            File.WriteAllText(Path.Combine(SourceDir, Fill.ComputeFile), Comp);
+            string a = ShaderBundlePipeline.GetOrBuild(SourceDir, Path.Combine(_root, "BuildTool"), Fill);
+            string b = ShaderBundlePipeline.GetOrBuild(SourceDir, Path.Combine(_root, "RuntimeCache"), Fill);
+            Assert.True(File.ReadAllBytes(a).SequenceEqual(File.ReadAllBytes(b)), "a build-time compute bundle and a runtime one from the same source must be byte-identical (D1)");
+        }
+
+        [Fact]
+        public void Compute_ToolchainDriftWithoutSourceChange_Throws_V8()
+        {
+            File.WriteAllText(Path.Combine(SourceDir, Fill.ComputeFile), Comp);
+            ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Fill);
+            string snapshot = ShaderBundlePipeline.InterfaceSnapshotPath(CacheDir, Fill.BundleName);
+            Assert.Contains("\"FillValues\"", File.ReadAllText(snapshot));
+            // Same source, "different compiler output": edit the recorded storage block binding, forget the hash manifest, recompile.
+            File.WriteAllText(snapshot, File.ReadAllText(snapshot).Replace("\"binding\": 1", "\"binding\": 9"));
+            File.Delete(Path.Combine(CacheDir, ShaderBundlePipeline.HashManifestFileName));
+            var ex = Assert.Throws<ShaderInterfaceContractException>(() => ShaderBundlePipeline.GetOrBuild(SourceDir, CacheDir, Fill));
+            Assert.Equal(ShaderBundlePipeline.Rule_V8_InterfaceSnapshot, ex.Violations[0].Rule);
+            Assert.Equal("Fill", ex.ShaderName);
+        }
     }
 }
