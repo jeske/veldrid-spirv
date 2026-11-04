@@ -318,12 +318,39 @@ namespace Veldrid.SPIRV
                 });
             }
 
+            // V10: storage blocks, merged per (set, binding) the same way (V6c proved the stages agree).
+            static VdShaderUniformMember[] Members(ShaderInterface_UniformMember[] source)
+                => source.Select(m => new VdShaderUniformMember { Name = m.Name, Type = m.GlslType, OffsetBytes = m.OffsetBytes, SizeBytes = m.SizeBytes }).ToArray();
+            var storage = new List<VdShaderStorageBlock>();
+            foreach (var group in itf.StorageBlocks.GroupBy(b => (b.Set, b.Binding)).OrderBy(g => g.Key.Set).ThenBy(g => g.Key.Binding))
+            {
+                var first = group.First();
+                ShaderStages stages = ShaderStages.None;
+                foreach (var b in group) stages |= b.Stages;
+                storage.Add(new VdShaderStorageBlock
+                {
+                    Name = first.BlockName,
+                    Set = first.Set,
+                    Binding = first.Binding,
+                    Stages = stages,
+                    ReadOnly = first.ReadOnly,
+                    FixedSizeBytes = first.FixedSizeBytes,
+                    Members = Members(first.Members),
+                    HasRuntimeArray = first.HasRuntimeArray,
+                    RuntimeArrayName = first.RuntimeArrayName,
+                    RuntimeArrayElementType = first.RuntimeArrayElementType,
+                    RuntimeArrayStrideBytes = first.RuntimeArrayStrideBytes,
+                    RuntimeArrayElementMembers = Members(first.RuntimeArrayElementMembers),
+                });
+            }
+
             return new VdShaderInterface
             {
                 VertexInputs = vertexInputs.ToArray(),
                 VertexOutputs = Varyings(itf.VertexOutputs),
                 FragmentInputs = Varyings(itf.FragmentInputs),
                 UniformBlocks = blocks.ToArray(),
+                StorageBlocks = storage.ToArray(),
             };
         }
 

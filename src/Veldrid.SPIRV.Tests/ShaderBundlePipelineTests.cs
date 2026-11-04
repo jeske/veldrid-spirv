@@ -61,7 +61,12 @@ namespace Veldrid.SPIRV.Tests
             var lf = ShaderBundlePipeline.ComputeInputHash(Pair, Vert, Frag);
             Assert.Equal(lf, crlf);
             Assert.Contains("spirv=", ShaderBundlePipeline.CompilerVersionTag);
-            Assert.Contains("native-abi=2", ShaderBundlePipeline.CompilerVersionTag);
+            // The ABI number comes from the single-source NATIVE_ABI_VERSION file at the repo root (V10 made it 3); never pin the literal here.
+            string abiFile = null;
+            for (var dir = new System.IO.DirectoryInfo(System.AppContext.BaseDirectory); dir != null && abiFile == null; dir = dir.Parent)
+                if (System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "NATIVE_ABI_VERSION"))) abiFile = System.IO.Path.Combine(dir.FullName, "NATIVE_ABI_VERSION");
+            Assert.True(abiFile != null, "NATIVE_ABI_VERSION not found walking up from the test output directory");
+            Assert.Contains($"native-abi={System.IO.File.ReadAllText(abiFile).Trim()}", ShaderBundlePipeline.CompilerVersionTag);
         }
 
         [Fact]

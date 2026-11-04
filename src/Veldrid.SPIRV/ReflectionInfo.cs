@@ -12,6 +12,8 @@ namespace Veldrid.SPIRV
         public InteropArray VertexOutputs; // InteropArray<NativeVaryingDescription>
         public InteropArray FragmentInputs; // InteropArray<NativeVaryingDescription>
         public InteropArray UniformBlocks; // InteropArray<NativeUniformBlockDescription>
+        // ABI 3 (V10): storage blocks, one entry per stage occurrence.
+        public InteropArray StorageBlocks; // InteropArray<NativeStorageBlockDescription>
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -81,5 +83,26 @@ namespace Veldrid.SPIRV
         public uint SizeBytes;
         public ShaderStages Stages; // uint8
         public InteropArray Members; // InteropArray<NativeUniformMemberDescription>
+    }
+
+    /// <summary>
+    /// Mirror of native <c>StorageBlockDescription</c> (pack 1, ABI 3 / V10): a <c>buffer</c> block of ONE stage with std430 placement, its
+    /// read-only flag, the fixed-member size and the trailing runtime array (element type, stride, element members).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct NativeStorageBlockDescription
+    {
+        public InteropArray BlockName; // InteropArray<byte>
+        public uint Set;
+        public uint Binding;
+        public ShaderStages Stages; // uint8
+        public Bool32 ReadOnly;
+        public uint FixedSizeBytes;
+        public InteropArray Members; // InteropArray<NativeUniformMemberDescription> (fixed members; the runtime array excluded)
+        public Bool32 HasRuntimeArray;
+        public InteropArray RuntimeArrayName; // InteropArray<byte>
+        public InteropArray RuntimeArrayElementType; // InteropArray<byte>
+        public uint RuntimeArrayStrideBytes;
+        public InteropArray RuntimeArrayElementMembers; // InteropArray<NativeUniformMemberDescription> (offsets WITHIN the element)
     }
 }

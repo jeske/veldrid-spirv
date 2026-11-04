@@ -299,6 +299,26 @@ struct UniformBlockDescription
     InteropArray<UniformMemberDescription> Members;
 };
 
+// ABI 3 (V10, 2026-11-04): a storage (`buffer`) block as seen by ONE stage, with the std430 placement the compiler laid out.
+// Fixed members come first (Members, the runtime array EXCLUDED); a trailing runtime array `T Items[];` is described by its
+// element type, its array stride and - for a struct element - the element's members with offsets WITHIN the element.
+// FixedSizeBytes = the byte offset where the runtime array starts (= the declared size when there is no runtime array).
+struct StorageBlockDescription
+{
+    InteropArray<char> BlockName;
+    uint32_t Set = 0;
+    uint32_t Binding = 0;
+    ShaderStages Stages = ShaderStages::None;
+    Bool32 ReadOnly = Bool32(false);
+    uint32_t FixedSizeBytes = 0;
+    InteropArray<UniformMemberDescription> Members;
+    Bool32 HasRuntimeArray = Bool32(false);
+    InteropArray<char> RuntimeArrayName;
+    InteropArray<char> RuntimeArrayElementType;
+    uint32_t RuntimeArrayStrideBytes = 0;
+    InteropArray<UniformMemberDescription> RuntimeArrayElementMembers;
+};
+
 struct ReflectionInfo
 {
     InteropArray<VertexElementDescription> VertexElements;
@@ -308,6 +328,8 @@ struct ReflectionInfo
     InteropArray<VaryingDescription> VertexOutputs;
     InteropArray<VaryingDescription> FragmentInputs;
     InteropArray<UniformBlockDescription> UniformBlocks;
+    // ABI 3: storage blocks (vertex / fragment / compute), one entry per stage occurrence.
+    InteropArray<StorageBlockDescription> StorageBlocks;
 };
 
 struct CompilationResult

@@ -8,11 +8,14 @@ namespace Veldrid.SPIRV
     /// <summary>A stage input/output as the GLSL SOURCE declares it: <c>layout(location = N) [flat] in|out TYPE name[N];</c>.</summary>
     public readonly record struct GlslDeclared_Varying(string Name, uint Location, string GlslType, bool Flat, uint ArrayLength);
 
-    /// <summary>A uniform block member as declared: <c>TYPE name[N];</c> in declaration order.</summary>
-    public readonly record struct GlslDeclared_Member(string Name, string GlslType, uint ArrayLength);
+    /// <summary>A block member as declared: <c>TYPE name[N];</c> in declaration order. <paramref name="IsRuntimeArray"/> = <c>TYPE name[];</c> (V10, storage blocks only).</summary>
+    public readonly record struct GlslDeclared_Member(string Name, string GlslType, uint ArrayLength, bool IsRuntimeArray = false);
 
     /// <summary>A uniform block as declared: <c>layout(set = S, binding = B[, std140]) uniform Name { members } [instance];</c>.</summary>
     public sealed record GlslDeclared_UniformBlock(string BlockName, uint Set, uint Binding, GlslDeclared_Member[] Members);
+
+    /// <summary>V10: a storage block as declared: <c>layout(std430, set = S, binding = B) [readonly] buffer Name { members } [instance];</c>.</summary>
+    public sealed record GlslDeclared_StorageBlock(string BlockName, uint Set, uint Binding, bool ReadOnly, GlslDeclared_Member[] Members);
 
     /// <summary>An opaque resource as declared: <c>layout(set = S, binding = B) uniform texture2D|sampler|... name;</c>.</summary>
     public readonly record struct GlslDeclared_Resource(string Name, uint Set, uint Binding, string GlslType);
@@ -29,7 +32,8 @@ namespace Veldrid.SPIRV
         GlslDeclared_Varying[] Outputs,
         GlslDeclared_UniformBlock[] UniformBlocks,
         GlslDeclared_Resource[] Resources,
-        string[] UnparseableLayoutLines)
+        string[] UnparseableLayoutLines,
+        GlslDeclared_StorageBlock[] StorageBlocks)
     {
         private static readonly Regex CommentRegex = new(@"//[^\n]*|/\*.*?\*/", RegexOptions.Compiled | RegexOptions.Singleline);
         // layout(...) qualifier list, then the declaration up to ';' or '{'. Block bodies are handled separately.
@@ -37,7 +41,10 @@ namespace Veldrid.SPIRV
         private static readonly Regex VaryingDeclRegex = new(@"^(?:(?<flat>flat)\s+)?(?:(?:smooth|noperspective|centroid|sample|precise|highp|mediump|lowp)\s+)*(?<dir>in|out)\s+(?:(?:highp|mediump|lowp)\s+)?(?<type>\w+)\s+(?<name>\w+)\s*(?:\[\s*(?<arr>\d+)\s*\])?$", RegexOptions.Compiled);
         private static readonly Regex ResourceDeclRegex = new(@"^uniform\s+(?:(?:highp|mediump|lowp)\s+)?(?<type>\w+)\s+(?<name>\w+)\s*(?:\[\s*(?<arr>\d+)\s*\])?$", RegexOptions.Compiled);
         private static readonly Regex BlockDeclRegex = new(@"^uniform\s+(?<name>\w+)$", RegexOptions.Compiled);
-        private static readonly Regex MemberRegex = new(@"(?:(?:highp|mediump|lowp)\s+)?(?<type>\w+)\s+(?<name>\w+)\s*(?:\[\s*(?<arr>\d+)\s*\])?\s*;", RegexOptions.Compiled);
+        // V10: `[readonly] [restrict|coherent|volatile|writeonly]* buffer Name`
+        private static readonly Regex StorageBlockDeclRegex = new(@"^(?:(?<ro>readonly)\s+)?(?:(?:restrict|coherent|volatile|writeonly|readonly)\s+)*buffer\s+(?<name>\w+)$", RegexOptions.Compiled);
+        // A member; `T Name[];` (empty brackets) is a runtime array - legal only as the LAST member of a buffer block.
+        private static readonly Regex MemberRegex = new(@"(?:(?:highp|mediump|lowp)\s+)?(?<type>\w+)\s+(?<name>\w+)\s*(?:\[\s*(?<arr>\d*)\s*\])?\s*;", RegexOptions.Compiled);
         private static readonly Regex QualRegex = new(@"(?<key>\w+)\s*=\s*(?<val>\d+)", RegexOptions.Compiled);
 
         /// <summary>Parse one stage's GLSL. Never throws on odd input; unparseable layout lines are returned for the verifier to report.</summary>
@@ -48,6 +55,7 @@ namespace Veldrid.SPIRV
             var inputs = new List<GlslDeclared_Varying>();
             var outputs = new List<GlslDeclared_Varying>();
             var blocks = new List<GlslDeclared_UniformBlock>();
+            var storageBlocks = new List<GlslDeclared_StorageBlock>();
             var resources = new List<GlslDeclared_Resource>();
             var unparseable = new List<string>();
 
@@ -60,24 +68,34 @@ namespace Veldrid.SPIRV
 
                 if (m.Groups["term"].Value == "{")
                 {
-                    // A block: uniform Name { ... } [instance];   (buffer/storage blocks and in/out blocks are ignored here)
+                    // A block: uniform Name { ... } [instance];  or (V10)  [readonly] buffer Name { ... } [instance];   (in/out blocks are ignored)
                     var bm = BlockDeclRegex.Match(decl);
-                    if (!bm.Success) continue;   // e.g. 'buffer Foo {' or 'in VertexData {' - not a uniform block
+                    var sm = bm.Success ? null : StorageBlockDeclRegex.Match(decl);
+                    if (!bm.Success && !(sm?.Success ?? false)) continue;   // e.g. 'in VertexData {' - not a block we check
                     if (!quals.TryGetValue("set", out uint set) || !quals.TryGetValue("binding", out uint binding)) { unparseable.Add(raw + " {"); continue; }
                     int bodyStart = m.Index + m.Length;
                     int bodyEnd = text.IndexOf('}', bodyStart);
                     if (bodyEnd < 0) { unparseable.Add(raw + " {"); continue; }
                     string body = text.Substring(bodyStart, bodyEnd - bodyStart);
                     var members = MemberRegex.Matches(body).Cast<Match>()
-                        .Select(mm => new GlslDeclared_Member(mm.Groups["name"].Value, mm.Groups["type"].Value, mm.Groups["arr"].Success ? uint.Parse(mm.Groups["arr"].Value) : 0u))
+                        .Select(mm => new GlslDeclared_Member(mm.Groups["name"].Value, mm.Groups["type"].Value,
+                            mm.Groups["arr"].Success && mm.Groups["arr"].Value.Length > 0 ? uint.Parse(mm.Groups["arr"].Value) : 0u,
+                            IsRuntimeArray: mm.Groups["arr"].Success && mm.Groups["arr"].Value.Length == 0))
                         .ToArray();
-                    blocks.Add(new GlslDeclared_UniformBlock(bm.Groups["name"].Value, set, binding, members));
+                    if (bm.Success)
+                        blocks.Add(new GlslDeclared_UniformBlock(bm.Groups["name"].Value, set, binding, members));
+                    else
+                        storageBlocks.Add(new GlslDeclared_StorageBlock(sm.Groups["name"].Value, set, binding, sm.Groups["ro"].Success, members));
                     continue;
                 }
 
                 var vm = VaryingDeclRegex.Match(decl);
                 if (vm.Success)
                 {
+                    // A redeclared BUILT-IN is not an interface varying: 'layout(depth_less) out float gl_FragDepth;' (conservative depth),
+                    // 'layout(origin_upper_left) in vec4 gl_FragCoord;'. Built-ins never appear in the compiled stage_inputs/stage_outputs
+                    // either (ReflectVaryings), so there is nothing to match by name - skip, never report as unparseable.
+                    if (vm.Groups["name"].Value.StartsWith("gl_", StringComparison.Ordinal)) continue;
                     if (!quals.TryGetValue("location", out uint location)) { unparseable.Add(raw); continue; }
                     var v = new GlslDeclared_Varying(vm.Groups["name"].Value, location, vm.Groups["type"].Value, vm.Groups["flat"].Success, vm.Groups["arr"].Success ? uint.Parse(vm.Groups["arr"].Value) : 0u);
                     (vm.Groups["dir"].Value == "in" ? inputs : outputs).Add(v);
@@ -98,7 +116,7 @@ namespace Veldrid.SPIRV
                 unparseable.Add(raw);
             }
 
-            return new GlslInterfaceDeclarations(inputs.ToArray(), outputs.ToArray(), blocks.ToArray(), resources.ToArray(), unparseable.ToArray());
+            return new GlslInterfaceDeclarations(inputs.ToArray(), outputs.ToArray(), blocks.ToArray(), resources.ToArray(), unparseable.ToArray(), storageBlocks.ToArray());
         }
 
         /// <summary>

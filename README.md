@@ -27,6 +27,16 @@ Although HLSL and OpenGL-style GLSL do not support SPIR-V Specialization Constan
 
 Veldrid.SPIRV is implemented primarily as a native library, interfacing with [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) and [shaderc](https://github.com/google/shaderc). There are build scripts in the root of the repository which can be used to automatically build the native library for your platform.
 
+### SPIRV-Cross submodule: local patches
+
+`ext/SPIRV-Cross` tracks upstream Khronos, plus local patches kept on branches of the fork https://github.com/jeske/SPIRV-Cross
+(remote `jeske` in the submodule) until they are merged upstream. Every local patch is also exported to
+`ext/SPIRV-Cross-local-patches.patch` (`git format-patch`) so a pin bump can re-apply it (`git am`) or drop it once upstream has it.
+
+- `hlsl-fragcoord-centroid-conservative-depth` (2026-11-04): HLSL backend honours `Centroid`/`Sample` on the FragCoord input and emits
+  `linear noperspective centroid float4 gl_FragCoord : SV_Position` when the fragment shader declares `depth_less`/`depth_greater` - the
+  D3D11 bytecode validator requires it with `SV_DepthLessEqual`/`SV_DepthGreaterEqual`. Pinned by `Veldrid.SPIRV.Tests/FragmentUavRegisterTests`.
+
 Native build requirements:
 
 * CMake

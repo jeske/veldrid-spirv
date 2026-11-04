@@ -49,6 +49,17 @@ namespace Veldrid.SPIRV
     public sealed record ShaderInterface_UniformBlock(string BlockName, uint Set, uint Binding, uint SizeBytes, ShaderStages Stages, ShaderInterface_UniformMember[] Members);
 
     /// <summary>
+    /// V10: one storage (<c>buffer</c>) block as ONE stage sees it, std430. <paramref name="Members"/> are the FIXED members (a trailing
+    /// runtime array excluded); <paramref name="FixedSizeBytes"/> is where the runtime array starts (= the declared block size without one).
+    /// A struct element's <paramref name="RuntimeArrayElementMembers"/> carry offsets WITHIN the element; scalar/vector elements have none.
+    /// </summary>
+    public sealed record ShaderInterface_StorageBlock(
+        string BlockName, uint Set, uint Binding, ShaderStages Stages, bool ReadOnly,
+        uint FixedSizeBytes, ShaderInterface_UniformMember[] Members,
+        bool HasRuntimeArray, string RuntimeArrayName, string RuntimeArrayElementType, uint RuntimeArrayStrideBytes,
+        ShaderInterface_UniformMember[] RuntimeArrayElementMembers);
+
+    /// <summary>
     /// The compiled interface of a shader set: what the GPU will actually bind, by NAME. Produced by reflection in
     /// <see cref="SpirvCompilation"/>, verified by <see cref="ShaderInterfaceVerifier"/>, carried in the .vdshader bundle (AN_Veldrid).
     /// Vertex inputs and resources are already on <see cref="SpirvReflection"/> (VertexElements, ResourceLayouts) and are not duplicated here.
@@ -56,9 +67,10 @@ namespace Veldrid.SPIRV
     public sealed record ShaderBundleInterface(
         ShaderInterface_Varying[] VertexOutputs,
         ShaderInterface_Varying[] FragmentInputs,
-        ShaderInterface_UniformBlock[] UniformBlocks)
+        ShaderInterface_UniformBlock[] UniformBlocks,
+        ShaderInterface_StorageBlock[] StorageBlocks)
     {
-        public static readonly ShaderBundleInterface Empty = new(Array.Empty<ShaderInterface_Varying>(), Array.Empty<ShaderInterface_Varying>(), Array.Empty<ShaderInterface_UniformBlock>());
+        public static readonly ShaderBundleInterface Empty = new(Array.Empty<ShaderInterface_Varying>(), Array.Empty<ShaderInterface_Varying>(), Array.Empty<ShaderInterface_UniformBlock>(), Array.Empty<ShaderInterface_StorageBlock>());
     }
 
     /// <summary>One failed contract rule: which rule, which NAME, what each side said.</summary>

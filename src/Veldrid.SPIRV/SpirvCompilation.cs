@@ -356,7 +356,42 @@ namespace Veldrid.SPIRV
                     members);
             }
 
-            return new ShaderBundleInterface(vertexOutputs, fragmentInputs, blocks);
+            // ABI 3 (V10): storage blocks.
+            ShaderInterface_StorageBlock[] storage = new ShaderInterface_StorageBlock[reflInfo->StorageBlocks.Count];
+            for (uint i = 0; i < reflInfo->StorageBlocks.Count; i++)
+            {
+                ref NativeStorageBlockDescription ns = ref reflInfo->StorageBlocks.Ref<NativeStorageBlockDescription>(i);
+                storage[i] = new ShaderInterface_StorageBlock(
+                    Util.GetString((byte*)ns.BlockName.Data, ns.BlockName.Count),
+                    ns.Set,
+                    ns.Binding,
+                    ns.Stages,
+                    ns.ReadOnly,
+                    ns.FixedSizeBytes,
+                    ReadMembers(ref ns.Members),
+                    ns.HasRuntimeArray,
+                    Util.GetString((byte*)ns.RuntimeArrayName.Data, ns.RuntimeArrayName.Count),
+                    Util.GetString((byte*)ns.RuntimeArrayElementType.Data, ns.RuntimeArrayElementType.Count),
+                    ns.RuntimeArrayStrideBytes,
+                    ReadMembers(ref ns.RuntimeArrayElementMembers));
+            }
+
+            return new ShaderBundleInterface(vertexOutputs, fragmentInputs, blocks, storage);
+        }
+
+        private static unsafe ShaderInterface_UniformMember[] ReadMembers(ref InteropArray native)
+        {
+            ShaderInterface_UniformMember[] members = new ShaderInterface_UniformMember[native.Count];
+            for (uint m = 0; m < native.Count; m++)
+            {
+                ref NativeUniformMemberDescription nm = ref native.Ref<NativeUniformMemberDescription>(m);
+                members[m] = new ShaderInterface_UniformMember(
+                    Util.GetString((byte*)nm.Name.Data, nm.Name.Count),
+                    Util.GetString((byte*)nm.GlslType.Data, nm.GlslType.Count),
+                    nm.OffsetBytes,
+                    nm.SizeBytes);
+            }
+            return members;
         }
 
         private static unsafe ShaderInterface_Varying[] ReadVaryings(ref InteropArray native)

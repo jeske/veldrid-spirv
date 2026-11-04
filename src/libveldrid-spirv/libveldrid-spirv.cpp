@@ -164,6 +164,102 @@ static InteropArray<UniformBlockDescription> CollectUniformBlocks(std::vector<Un
     return ret;
 }
 
+// One block member's name / GLSL type / placement, shared by the uniform and storage reflectors.
+static void FillMember(const Compiler &compiler, const SPIRType &structType, uint32_t typeId, uint32_t m, UniformMemberDescription &out)
+{
+    std::string memberName = compiler.get_member_name(typeId, m);
+    const SPIRType &memberType = compiler.get_type(structType.member_types[m]);
+    std::string glslType = GlslTypeName(compiler, memberType);
+    out.Name.CopyFrom(static_cast<uint32_t>(memberName.size()), memberName.c_str());
+    out.GlslType.CopyFrom(static_cast<uint32_t>(glslType.size()), glslType.c_str());
+    out.OffsetBytes = compiler.type_struct_member_offset(structType, m);
+    out.SizeBytes = static_cast<uint32_t>(compiler.get_declared_struct_member_size(structType, m));
+}
+
+// A runtime (unsized) array member: `T Items[];` - SPIR-V marks it with an array dimension of literal size 0.
+static bool IsRuntimeArray(const SPIRType &type)
+{
+    return !type.array.empty() && type.array_size_literal.back() && type.array.back() == 0;
+}
+
+// ABI 3 (V10): every storage block of one stage with the std430 placement the compiler actually laid out. Same shape as
+// ReflectUniformBlocks plus: read-only flag, the fixed-member size, and the trailing runtime array (element type, stride, element members).
+// This is what lets Veldrid verify a StorageBufferSlot<TElement> / the whole-block struct by NAME instead of refusing storage buffers.
+static void ReflectStorageBlocks(const Compiler &compiler, const SmallVector<Resource> &storageBuffers, ShaderStages stage,
+                                 std::vector<StorageBlockDescription *> &out)
+{
+    for (const Resource &sb : storageBuffers)
+    {
+        const SPIRType &blockType = compiler.get_type(sb.base_type_id);
+        StorageBlockDescription *block = new StorageBlockDescription();
+        std::string blockName = sb.name.empty() ? compiler.get_name(sb.base_type_id) : sb.name;
+        block->BlockName.CopyFrom(static_cast<uint32_t>(blockName.size()), blockName.c_str());
+        block->Set = compiler.get_decoration(sb.id, spv::DecorationDescriptorSet);
+        block->Binding = compiler.get_decoration(sb.id, spv::DecorationBinding);
+        block->Stages = stage;
+        block->ReadOnly = Bool32(compiler.get_buffer_block_flags(sb.id).get(spv::DecorationNonWritable));
+
+        uint32_t memberCount = static_cast<uint32_t>(blockType.member_types.size());
+        uint32_t fixedCount = memberCount;
+        if (memberCount > 0 && IsRuntimeArray(compiler.get_type(blockType.member_types[memberCount - 1])))
+        {
+            fixedCount = memberCount - 1;
+            uint32_t m = memberCount - 1;
+            const SPIRType &arrayType = compiler.get_type(blockType.member_types[m]);
+            block->HasRuntimeArray = Bool32(true);
+            std::string arrayName = compiler.get_member_name(sb.base_type_id, m);
+            block->RuntimeArrayName.CopyFrom(static_cast<uint32_t>(arrayName.size()), arrayName.c_str());
+            block->FixedSizeBytes = compiler.type_struct_member_offset(blockType, m);
+            block->RuntimeArrayStrideBytes = compiler.type_struct_member_array_stride(blockType, m);
+            // The element type = the member type with its (single, unsized) array dimension removed.
+            SPIRType elementType = arrayType;
+            elementType.array.pop_back();
+            elementType.array_size_literal.pop_back();
+            std::string elementName = GlslTypeName(compiler, elementType);
+            block->RuntimeArrayElementType.CopyFrom(static_cast<uint32_t>(elementName.size()), elementName.c_str());
+            if (elementType.basetype == SPIRType::Struct)
+            {
+                // Offsets of a struct element's members are WITHIN the element (SPIR-V decorates the element struct type itself).
+                const SPIRType &elementStruct = compiler.get_type(elementType.self);
+                block->RuntimeArrayElementMembers.Resize(static_cast<uint32_t>(elementStruct.member_types.size()));
+                for (uint32_t k = 0; k < elementStruct.member_types.size(); k++)
+                    FillMember(compiler, elementStruct, elementType.self, k, block->RuntimeArrayElementMembers[k]);
+            }
+        }
+        else
+        {
+            block->FixedSizeBytes = static_cast<uint32_t>(compiler.get_declared_struct_size(blockType));
+        }
+        block->Members.Resize(fixedCount);
+        for (uint32_t m = 0; m < fixedCount; m++)
+            FillMember(compiler, blockType, sb.base_type_id, m, block->Members[m]);
+        out.push_back(block);
+    }
+}
+
+static InteropArray<StorageBlockDescription> CollectStorageBlocks(std::vector<StorageBlockDescription *> &blocks)
+{
+    InteropArray<StorageBlockDescription> ret(static_cast<uint32_t>(blocks.size()));
+    for (uint32_t i = 0; i < blocks.size(); i++)
+    {
+        ret[i].BlockName = std::move(blocks[i]->BlockName);
+        ret[i].Set = blocks[i]->Set;
+        ret[i].Binding = blocks[i]->Binding;
+        ret[i].Stages = blocks[i]->Stages;
+        ret[i].ReadOnly = blocks[i]->ReadOnly;
+        ret[i].FixedSizeBytes = blocks[i]->FixedSizeBytes;
+        ret[i].Members = std::move(blocks[i]->Members);
+        ret[i].HasRuntimeArray = blocks[i]->HasRuntimeArray;
+        ret[i].RuntimeArrayName = std::move(blocks[i]->RuntimeArrayName);
+        ret[i].RuntimeArrayElementType = std::move(blocks[i]->RuntimeArrayElementType);
+        ret[i].RuntimeArrayStrideBytes = blocks[i]->RuntimeArrayStrideBytes;
+        ret[i].RuntimeArrayElementMembers = std::move(blocks[i]->RuntimeArrayElementMembers);
+        delete blocks[i];
+    }
+    blocks.clear();
+    return ret;
+}
+
 struct BindingInfo
 {
     uint32_t Set;
@@ -497,6 +593,9 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     std::vector<UniformBlockDescription *> uniformBlocks;
     ReflectUniformBlocks(*vsCompiler, vsResources.uniform_buffers, ShaderStages::Vertex, uniformBlocks);
     ReflectUniformBlocks(*fsCompiler, fsResources.uniform_buffers, ShaderStages::Fragment, uniformBlocks);
+    std::vector<StorageBlockDescription *> storageBlocks;
+    ReflectStorageBlocks(*vsCompiler, vsResources.storage_buffers, ShaderStages::Vertex, storageBlocks);
+    ReflectStorageBlocks(*fsCompiler, fsResources.storage_buffers, ShaderStages::Fragment, storageBlocks);
 
     std::map<BindingInfo, ResourceInfo> allResources;
 
@@ -520,6 +619,17 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
         uint32_t textureIndex = 0;
         uint32_t uavIndex = 0;
         uint32_t samplerIndex = 0;
+        // HLSL: pixel-shader UAV registers (u#) share a namespace with the render-target outputs (o#). fxc rejects a PS UAV below the
+        // number of PS outputs (X4509) and the DXBC validator counts a depth output (oDepth / oDepthLE / oDepthGE) as an output slot too,
+        // so the first legal UAV register for a graphics pipeline is max(1, <fragment output count>). The register chosen here is the
+        // register the shader is compiled with and is recorded in the flat binding map (BindingMapEntry.FlatIndex): Veldrid's D3D11
+        // backend binds exactly that register and adds NOTHING at bind time. fxc validates the choice - a wrong start is a compile
+        // error here, never a silent mis-bind at runtime. (The counter is shared with vertex-stage UAVs, which are rare; a vertex UAV
+        // at u1+ is legal.) Compute pipelines (CompileCompute) have no outputs and keep u0.
+        if (info.Target == HLSL)
+        {
+            uavIndex = std::max<uint32_t>(1, static_cast<uint32_t>(fsResources.stage_outputs.size()));
+        }
         for (auto &it : allResources)
         {
             uint32_t index = GetResourceIndex(info.Target, it.second.Kind, bufferIndex, textureIndex, uavIndex, samplerIndex);
@@ -671,6 +781,7 @@ CompilationResult *CompileVertexFragment(const CrossCompileInfo &info)
     result->Reflection.VertexOutputs = std::move(vertexOutputs);
     result->Reflection.FragmentInputs = std::move(fragmentInputs);
     result->Reflection.UniformBlocks = CollectUniformBlocks(uniformBlocks);
+    result->Reflection.StorageBlocks = CollectStorageBlocks(storageBlocks);
 
     if (!bindingMapEntries.empty())
     {
@@ -699,6 +810,8 @@ CompilationResult *CompileCompute(const CrossCompileInfo &info)
     // Interface reflection first (before AddResources may rename): a compute interface is blocks + resources only (no varyings).
     std::vector<UniformBlockDescription *> uniformBlocks;
     ReflectUniformBlocks(*csCompiler, csResources.uniform_buffers, ShaderStages::Compute, uniformBlocks);
+    std::vector<StorageBlockDescription *> storageBlocks;
+    ReflectStorageBlocks(*csCompiler, csResources.storage_buffers, ShaderStages::Compute, storageBlocks);
 
     std::map<BindingInfo, ResourceInfo> allResources;
 

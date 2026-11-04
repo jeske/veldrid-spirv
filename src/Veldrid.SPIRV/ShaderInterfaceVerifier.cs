@@ -18,6 +18,8 @@ namespace Veldrid.SPIRV
         public const string Rule_V5b_VaryingSets = "V5b";
         public const string Rule_V6_BlockMembersDeclared = "V6";
         public const string Rule_V6b_BlockStagesAgree = "V6b";
+        /// <summary>V10: a storage block declared by two stages must be declared identically.</summary>
+        public const string Rule_V6c_StorageStagesAgree = "V6c";
 
         /// <summary>All violations for a compiled vertex+fragment interface. Empty list = contract holds.</summary>
         public static List<ShaderContractViolation> VerifyStages(ShaderBundleInterface compiled)
@@ -26,6 +28,7 @@ namespace Veldrid.SPIRV
             var violations = new List<ShaderContractViolation>();
             VerifyVaryingSets(compiled.VertexOutputs, compiled.FragmentInputs, violations);
             VerifyUniformBlocksAgreeAcrossStages(compiled.UniformBlocks, violations);
+            VerifyStorageBlocksAgreeAcrossStages(compiled.StorageBlocks, violations);
             return violations;
         }
 
@@ -56,6 +59,8 @@ namespace Veldrid.SPIRV
             VerifyDeclaredVaryings("fragment in", frag.Inputs, compiled.Interface.FragmentInputs, violations);
             VerifyDeclaredBlocks("vertex", vert.UniformBlocks, compiled.Interface.UniformBlocks.Where(b => b.Stages == ShaderStages.Vertex).ToArray(), violations);
             VerifyDeclaredBlocks("fragment", frag.UniformBlocks, compiled.Interface.UniformBlocks.Where(b => b.Stages == ShaderStages.Fragment).ToArray(), violations);
+            VerifyDeclaredStorageBlocks("vertex", vert.StorageBlocks, compiled.Interface.StorageBlocks.Where(b => b.Stages == ShaderStages.Vertex).ToArray(), violations);
+            VerifyDeclaredStorageBlocks("fragment", frag.StorageBlocks, compiled.Interface.StorageBlocks.Where(b => b.Stages == ShaderStages.Fragment).ToArray(), violations);
             return violations;
         }
 
@@ -208,6 +213,65 @@ namespace Veldrid.SPIRV
                             violations.Add(new ShaderContractViolation(Rule_V6b_BlockStagesAgree, $"{first.BlockName}.{om.Name}", $"{first.Stages}: ABSENT", $"{other.Stages}: {om.GlslType} @ {om.OffsetBytes}", $"member missing in one stage at {slot}"));
                 }
             }
+        }
+
+        /// <summary>V6c (V10): when both stages declare a storage block at (set, binding), name, read-only, fixed size, runtime-array stride and member names/placement must agree.</summary>
+        private static void VerifyStorageBlocksAgreeAcrossStages(ShaderInterface_StorageBlock[] blocks, List<ShaderContractViolation> violations)
+        {
+            foreach (var group in blocks.GroupBy(b => (b.Set, b.Binding)))
+            {
+                var first = group.First();
+                foreach (var other in group.Skip(1))
+                {
+                    string slot = $"set {first.Set} binding {first.Binding}";
+                    if (!string.Equals(first.BlockName, other.BlockName, StringComparison.Ordinal))
+                        violations.Add(new ShaderContractViolation(Rule_V6c_StorageStagesAgree, first.BlockName, $"{first.Stages}: block '{first.BlockName}'", $"{other.Stages}: block '{other.BlockName}'", $"different storage block names at {slot}"));
+                    if (first.ReadOnly != other.ReadOnly)
+                        violations.Add(new ShaderContractViolation(Rule_V6c_StorageStagesAgree, first.BlockName, $"{first.Stages}: {(first.ReadOnly ? "readonly" : "read-write")}", $"{other.Stages}: {(other.ReadOnly ? "readonly" : "read-write")}", $"storage access differs at {slot} - one resource kind per binding"));
+                    if (first.FixedSizeBytes != other.FixedSizeBytes || first.HasRuntimeArray != other.HasRuntimeArray || first.RuntimeArrayStrideBytes != other.RuntimeArrayStrideBytes)
+                        violations.Add(new ShaderContractViolation(Rule_V6c_StorageStagesAgree, first.BlockName, $"{first.Stages}: fixed {first.FixedSizeBytes} B, array {(first.HasRuntimeArray ? first.RuntimeArrayElementType + " stride " + first.RuntimeArrayStrideBytes : "none")}", $"{other.Stages}: fixed {other.FixedSizeBytes} B, array {(other.HasRuntimeArray ? other.RuntimeArrayElementType + " stride " + other.RuntimeArrayStrideBytes : "none")}", $"storage layout differs at {slot}"));
+                    var otherMembers = other.Members.Concat(other.RuntimeArrayElementMembers).ToDictionary(m => m.Name, StringComparer.Ordinal);
+                    foreach (var m in first.Members.Concat(first.RuntimeArrayElementMembers))
+                    {
+                        if (!otherMembers.TryGetValue(m.Name, out var om))
+                            violations.Add(new ShaderContractViolation(Rule_V6c_StorageStagesAgree, $"{first.BlockName}.{m.Name}", $"{first.Stages}: {m.GlslType} @ {m.OffsetBytes}", $"{other.Stages}: ABSENT", $"member missing in one stage at {slot}"));
+                        else if (om.OffsetBytes != m.OffsetBytes || om.SizeBytes != m.SizeBytes)
+                            violations.Add(new ShaderContractViolation(Rule_V6c_StorageStagesAgree, $"{first.BlockName}.{m.Name}", $"{first.Stages}: {m.GlslType} @ {m.OffsetBytes} ({m.SizeBytes} B)", $"{other.Stages}: {om.GlslType} @ {om.OffsetBytes} ({om.SizeBytes} B)", $"member placement differs at {slot}"));
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// V6 for storage blocks (V10): every declared <c>buffer</c> block exists in the compiled stage at the declared (set, binding) with the
+        /// declared member NAMES in order (fixed members, then the runtime array), and the compiled stage has no storage block the source did
+        /// not declare. Placement is verified against the C# struct at pipeline creation (Veldrid V7e); an independent std430 oracle is a follow-up.
+        /// </summary>
+        private static void VerifyDeclaredStorageBlocks(string stage, GlslDeclared_StorageBlock[] declared, ShaderInterface_StorageBlock[] compiled, List<ShaderContractViolation> violations)
+        {
+            var compiledByName = compiled.ToDictionary(b => b.BlockName, StringComparer.Ordinal);
+            foreach (var d in declared)
+            {
+                if (!compiledByName.TryGetValue(d.BlockName, out var c))
+                {
+                    violations.Add(new ShaderContractViolation(Rule_V6_BlockMembersDeclared, d.BlockName, $"declared {stage} storage block at set {d.Set} binding {d.Binding}", "compiled: ABSENT", "a declared storage block was eliminated or renamed by the toolchain"));
+                    continue;
+                }
+                if (c.Set != d.Set || c.Binding != d.Binding)
+                    violations.Add(new ShaderContractViolation(Rule_V6_BlockMembersDeclared, d.BlockName, $"declared set {d.Set} binding {d.Binding}", $"compiled set {c.Set} binding {c.Binding}", "the toolchain MOVED a storage block"));
+                if (c.ReadOnly != d.ReadOnly)
+                    violations.Add(new ShaderContractViolation(Rule_V6_BlockMembersDeclared, d.BlockName, $"declared {(d.ReadOnly ? "readonly" : "read-write")}", $"compiled {(c.ReadOnly ? "readonly" : "read-write")}", "the toolchain changed a storage block's access"));
+                var declaredNames = d.Members.Select(m => m.Name).ToArray();
+                var compiledNames = c.Members.Select(m => m.Name).Concat(c.HasRuntimeArray ? new[] { c.RuntimeArrayName } : Array.Empty<string>()).ToArray();
+                if (!declaredNames.SequenceEqual(compiledNames, StringComparer.Ordinal))
+                    violations.Add(new ShaderContractViolation(Rule_V6_BlockMembersDeclared, d.BlockName, $"declared members [{string.Join(", ", declaredNames)}]", $"compiled members [{string.Join(", ", compiledNames)}]", "member order/names differ - the toolchain reordered, renamed or dropped a member"));
+                bool declaredRuntime = d.Members.Length > 0 && d.Members[^1].IsRuntimeArray;
+                if (declaredRuntime != c.HasRuntimeArray)
+                    violations.Add(new ShaderContractViolation(Rule_V6_BlockMembersDeclared, d.BlockName, $"declared {(declaredRuntime ? "a trailing runtime array" : "no runtime array")}", $"compiled {(c.HasRuntimeArray ? "runtime array " + c.RuntimeArrayName + "[]" : "no runtime array")}", "runtime-array shape differs"));
+            }
+            foreach (var c in compiled)
+                if (!declared.Any(d => string.Equals(d.BlockName, c.BlockName, StringComparison.Ordinal)))
+                    violations.Add(new ShaderContractViolation(Rule_V6_BlockMembersDeclared, c.BlockName, "declared: ABSENT", $"compiled {stage} storage block at set {c.Set} binding {c.Binding}", "the compiled stage has a storage block the source never declared"));
         }
     }
 }
