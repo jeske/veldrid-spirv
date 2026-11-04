@@ -127,7 +127,11 @@ namespace Veldrid.SPIRV
 
             // D5: the bundle carries its interface so pipeline creation can verify the application against it BY NAME (V7, in Veldrid).
             if (capturedReflection != null)
+            {
                 bundle.Interface = ToBundleInterface(capturedReflection);
+                // V11 (spec 204 T1): the host-filled SPIRV_Cross_VertexInfo cbuffer register, for Veldrid's D3D11 backend to bind exactly.
+                bundle.Interface.HlslVertexInfoRegister = capturedReflection.HlslVertexInfoRegister;
+            }
 
             // Populate ResourceLayoutDescriptions from reflection
             if (capturedReflection != null)
